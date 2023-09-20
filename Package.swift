@@ -142,7 +142,7 @@ let package = Package(
             targets: ["Realm", "RealmSwift"]),
     ],
     dependencies: [
-        .package("https://github.com/kula-app/realm-core.git", branch: "kula-patch")
+        .package(url: "https://github.com/kula-app/realm-core.git", branch: "kula-patch")
     ],
     targets: [
       .target(
