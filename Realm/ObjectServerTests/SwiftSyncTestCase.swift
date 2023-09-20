@@ -34,6 +34,10 @@ public extension User {
         config.objectTypes = [SwiftPerson.self, SwiftHugeSyncObject.self, SwiftTypesSyncObject.self, SwiftCustomColumnObject.self]
         return config
     }
+
+    func collection(for object: ObjectBase.Type) -> MongoCollection {
+        mongoClient("mongodb1").database(named: "test_data").collection(withName: object.className())
+    }
 }
 
 public func randomString(_ length: Int) -> String {
@@ -253,11 +257,9 @@ open class SwiftSyncTestCase: RLMSyncTestCase {
 
     // MARK: - Mongo Client
 
-    public func setupMongoCollection(for collection: String) throws -> MongoCollection {
-        let user = try logInUser(for: basicCredentials())
-        let mongoClient = user.mongoClient("mongodb1")
-        let database = mongoClient.database(named: "test_data")
-        let collection = database.collection(withName: collection)
+    public func setupMongoCollection(user: User? = nil, for type: ObjectBase.Type) throws -> MongoCollection {
+        let u = try user ?? logInUser(for: basicCredentials())
+        let collection = u.collection(for: type)
         removeAllFromCollection(collection)
         return collection
     }
@@ -271,6 +273,14 @@ open class SwiftSyncTestCase: RLMSyncTestCase {
             deleteEx.fulfill()
         }
         wait(for: [deleteEx], timeout: 30.0)
+    }
+
+    public func waitForCollectionCount(_ collection: MongoCollection, _ count: Int) {
+        let waitStart = Date()
+        while collection.count(filter: [:]).await(self) != count && waitStart.timeIntervalSinceNow > -600.0 {
+            sleep(1)
+        }
+        XCTAssertEqual(collection.count(filter: [:]).await(self), count)
     }
 }
 
@@ -303,7 +313,7 @@ extension SwiftSyncTestCase {
     }
 }
 
-@available(OSX 10.15, watchOS 6.0, iOS 13.0, iOSApplicationExtension 13.0, OSXApplicationExtension 10.15, tvOS 13.0, *)
+@available(macOS 10.15, watchOS 6.0, iOS 13.0, tvOS 13.0, *)
 public extension Publisher {
     func expectValue(_ testCase: XCTestCase, _ expectation: XCTestExpectation,
                      receiveValue: (@Sendable (Self.Output) -> Void)? = nil) -> AnyCancellable {

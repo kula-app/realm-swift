@@ -1,20 +1,18 @@
-// swift-tools-version:5.5
+// swift-tools-version:5.7
 
 import PackageDescription
 import Foundation
 
-let coreVersionStr = "13.15.1"
-let cocoaVersionStr = "10.41.0"
+let coreVersion = Version("13.20.1")
+let cocoaVersion = Version("10.42.3")
 
-let coreVersionPieces = coreVersionStr.split(separator: ".")
-let coreVersionExtra = coreVersionPieces[2].split(separator: "-")
 let cxxSettings: [CXXSetting] = [
     .headerSearchPath("."),
     .headerSearchPath("include"),
     .define("REALM_SPM", to: "1"),
     .define("REALM_ENABLE_SYNC", to: "1"),
-    .define("REALM_COCOA_VERSION", to: "@\"\(cocoaVersionStr)\""),
-    .define("REALM_VERSION", to: "\"\(coreVersionStr)\""),
+    .define("REALM_COCOA_VERSION", to: "@\"\(cocoaVersion)\""),
+    .define("REALM_VERSION", to: "\"\(coreVersion)\""),
     .define("REALM_IOPLATFORMUUID", to: "@\"\(runCommand())\""),
 
     .define("REALM_DEBUG", .when(configuration: .debug)),
@@ -23,11 +21,11 @@ let cxxSettings: [CXXSetting] = [
     .define("REALM_ENABLE_ASSERTIONS", to: "1"),
     .define("REALM_ENABLE_ENCRYPTION", to: "1"),
 
-    .define("REALM_VERSION_MAJOR", to: String(coreVersionPieces[0])),
-    .define("REALM_VERSION_MINOR", to: String(coreVersionPieces[1])),
-    .define("REALM_VERSION_PATCH", to: String(coreVersionExtra[0])),
-    .define("REALM_VERSION_EXTRA", to: "\"\(coreVersionExtra.count > 1 ? String(coreVersionExtra[1]) : "")\""),
-    .define("REALM_VERSION_STRING", to: "\"\(coreVersionStr)\""),
+    .define("REALM_VERSION_MAJOR", to: String(coreVersion.major)),
+    .define("REALM_VERSION_MINOR", to: String(coreVersion.minor)),
+    .define("REALM_VERSION_PATCH", to: String(coreVersion.patch)),
+    .define("REALM_VERSION_EXTRA", to: "\"\(coreVersion.prereleaseIdentifiers.first ?? "")\""),
+    .define("REALM_VERSION_STRING", to: "\"\(coreVersion)\""),
 ]
 let testCxxSettings: [CXXSetting] = cxxSettings + [
     // Command-line `swift build` resolves header search paths
@@ -144,12 +142,12 @@ let package = Package(
             targets: ["Realm", "RealmSwift"]),
     ],
     dependencies: [
-        .package(name: "RealmDatabase", url: "https://github.com/kula-app/realm-core.git", branch: "kula-patch")
+        .package("https://github.com/kula-app/realm-core.git", branch: "kula-patch")
     ],
     targets: [
       .target(
             name: "Realm",
-            dependencies: [.product(name: "RealmCore", package: "RealmDatabase")],
+            dependencies: [.product(name: "RealmCore", package: "realm-core")],
             path: ".",
             exclude: [
                 "CHANGELOG.md",
@@ -163,7 +161,6 @@ let package = Package(
                 "Realm.podspec",
                 "Realm.xcodeproj",
                 "Realm/ObjectServerTests",
-                "Realm/RLMPlatform.h.in",
                 "Realm/Realm-Info.plist",
                 "Realm/Swift/RLMSupport.swift",
                 "Realm/TestUtils",
@@ -252,7 +249,10 @@ let package = Package(
                 "Realm/RLMUserAPIKey.mm"
             ],
             publicHeadersPath: "include",
-            cxxSettings: cxxSettings
+            cxxSettings: cxxSettings,
+            linkerSettings: [
+                .linkedFramework("UIKit", .when(platforms: [.iOS, .macCatalyst, .tvOS, .watchOS]))
+            ]
         ),
         .target(
             name: "RealmSwift",

@@ -103,16 +103,7 @@ namespace {
         self.enableSessionMultiplexing = true;
         self.encryptMetadata = !getenv("REALM_DISABLE_METADATA_ENCRYPTION") && !RLMIsRunningInPlayground();
         RLMNSStringToStdString(_clientConfig.base_file_path, RLMDefaultDirectoryForBundleIdentifier(nil));
-
-        _config.device_info.sdk = "Realm Swift";
-
-        // Platform info isn't available when running via `swift test`.
-        // Non-Xcode SPM builds can't build for anything but macOS, so this is
-        // probably unimportant for now and we can just report "unknown"
-        auto processInfo = [NSProcessInfo processInfo];
-        RLMNSStringToStdString(_config.device_info.platform_version,
-                               [processInfo operatingSystemVersionString] ?: @"unknown");
-        RLMNSStringToStdString(_config.device_info.sdk_version, REALM_COCOA_VERSION);
+        configureSyncConnectionParameters(_config);
     }
     return self;
 }
@@ -139,7 +130,24 @@ namespace {
         self.localAppName = localAppName;
         self.localAppVersion = localAppVersion;
         self.defaultRequestTimeoutMS = defaultRequestTimeoutMS;
-        configureSyncConnectionParameters(_config);
+    }
+    return self;
+}
+
+- (instancetype)initWithBaseURL:(nullable NSString *)baseURL
+                      transport:(nullable id<RLMNetworkTransport>)transport {
+    return [self initWithBaseURL:baseURL
+                       transport:transport
+         defaultRequestTimeoutMS:60000];
+}
+
+- (instancetype)initWithBaseURL:(nullable NSString *)baseURL
+                      transport:(nullable id<RLMNetworkTransport>)transport
+        defaultRequestTimeoutMS:(NSUInteger)defaultRequestTimeoutMS {
+    if (self = [self init]) {
+        self.baseURL = baseURL;
+        self.transport = transport;
+        self.defaultRequestTimeoutMS = defaultRequestTimeoutMS;
     }
     return self;
 }
@@ -153,6 +161,9 @@ static void configureSyncConnectionParameters(realm::app::App::Config& config) {
     config.device_info.sdk = "Realm Swift";
     RLMNSStringToStdString(config.device_info.sdk_version, REALM_COCOA_VERSION);
 
+    // Platform info isn't available when running via `swift test`.
+    // Non-Xcode SPM builds can't build for anything but macOS, so this is
+    // probably unimportant for now and we can just report "unknown"
     auto processInfo = [NSProcessInfo processInfo];
     RLMNSStringToStdString(config.device_info.platform_version,
                            [processInfo operatingSystemVersionString] ?: @"unknown");
@@ -228,22 +239,6 @@ static void setOptionalString(std::optional<std::string>& dst, NSString *src) {
         transport = [RLMNetworkTransport new];
     }
     _config.transport = std::make_shared<CocoaNetworkTransport>(transport);
-}
-
-- (NSString *)localAppName {
-    return getOptionalString(_config.local_app_name);
-}
-
-- (void)setLocalAppName:(nullable NSString *)localAppName {
-    setOptionalString(_config.local_app_name, localAppName);
-}
-
-- (NSString *)localAppVersion {
-    return getOptionalString(_config.local_app_version);
-}
-
-- (void)setLocalAppVersion:(nullable NSString *)localAppVersion {
-    setOptionalString(_config.local_app_version, localAppVersion);
 }
 
 - (NSUInteger)defaultRequestTimeoutMS {

@@ -47,21 +47,12 @@ func assertSyncError(_ error: Error, _ code: SyncError.Code, _ message: String,
     let e = error as NSError
     XCTAssertEqual(e.domain, RLMSyncErrorDomain, file: file, line: line)
     XCTAssertEqual(e.code, code.rawValue, file: file, line: line)
-    XCTAssertEqual(e.localizedDescription, "Unable to refresh the user access token.",
-                   file: file, line: line)
+    XCTAssertEqual(e.localizedDescription, message, file: file, line: line)
 }
 
 @available(OSX 10.14, *)
 @objc(SwiftObjectServerTests)
 class SwiftObjectServerTests: SwiftSyncTestCase {
-    func setupMongoCollection(user: User, collectionName: String) -> MongoCollection {
-        let mongoClient = user.mongoClient("mongodb1")
-        let database = mongoClient.database(named: "test_data")
-        let collection = database.collection(withName: collectionName)
-        removeAllFromCollection(collection)
-        return collection
-    }
-
     /// It should be possible to successfully open a Realm configured for sync.
     func testBasicSwiftSync() throws {
         let user = try logInUser(for: basicCredentials())
@@ -423,10 +414,27 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
     }
 
     // After restarting sync, the sync history translator service needs time
-    // to resynthesize the new history from existing objects on the server
-    // This method waits for the realm to receive "Paul" from the server
-    // as confirmation.
-    func waitForServerHistoryAfterRestart(realm: Realm) {
+    // to resynthesize the new history from existing objects on the server.
+    // This method creates a new document on the server and then waits for it to
+    // be synchronized to a newly created Realm to confirm everything is up-to-date.
+    func waitForServerHistoryAfterRestart(config: Realm.Configuration, collection: MongoCollection) {
+        XCTAssertFalse(FileManager.default.fileExists(atPath: config.fileURL!.path))
+        let realm = Realm.asyncOpen(configuration: config).await(self)
+        XCTAssertTrue(realm.isEmpty)
+
+        // Create an object on the server which should be present after client reset
+        removeAllFromCollection(collection)
+        let serverObject: Document = [
+            "_id": .objectId(ObjectId.generate()),
+            "firstName": .string("Paul"),
+            "lastName": .string("M"),
+            "age": .int32(30),
+            "realm_id": config.syncConfiguration?.partitionValue
+        ]
+        collection.insertOne(serverObject).await(self, timeout: 30.0)
+        XCTAssertEqual(collection.count(filter: [:]).await(self), 1)
+
+        // Wait for the document to be processed by the translator
         let start = Date()
         while realm.isEmpty && start.timeIntervalSinceNow > -60.0 {
             self.waitForDownloads(for: realm)
@@ -441,7 +449,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         }
     }
 
-    func prepareClientReset(_ partition: String, _ user: User) throws {
+    func prepareClientReset(_ partition: String, _ user: User, appId: String? = nil) throws {
         try autoreleasepool {
             // Initialize the local file so that we have conflicting history
             var configuration = user.configuration(partitionValue: partition)
@@ -449,7 +457,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
             let realm = try Realm(configuration: configuration)
             waitForUploads(for: realm)
             realm.syncSession!.suspend()
-            try RealmServer.shared.triggerClientReset(appId, realm)
+            try RealmServer.shared.triggerClientReset(appId ?? self.appId, realm)
 
             // Add an object to the local realm that won't be synced due to the suspend
             try realm.write {
@@ -458,17 +466,11 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
             XCTAssertEqual(realm.objects(SwiftPerson.self).count, 1)
         }
 
-        // Write a different object in a different Realm which should appear in
-        // the first one after a client reset
-        try autoreleasepool {
-            var config = user.configuration(partitionValue: partition)
-            config.fileURL = RLMTestRealmURL()
-            config.objectTypes = [SwiftPerson.self]
-            let realm = try Realm(configuration: config)
-            try realm.write {
-                realm.add(SwiftPerson(firstName: "Paul", lastName: "M"))
-            }
-            waitForUploads(for: realm)
+        var config = user.configuration(partitionValue: partition)
+        config.fileURL = RLMTestRealmURL()
+        config.objectTypes = [SwiftPerson.self]
+        autoreleasepool {
+            waitForServerHistoryAfterRestart(config: config, collection: user.collection(for: SwiftPerson.self))
         }
     }
 
@@ -476,7 +478,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         let appId = try RealmServer.shared.createAppWithQueryableFields(["age"])
         let app = app(withId: appId)
         let user = try logInUser(for: basicCredentials(app: app), app: app)
-        let collection = setupMongoCollection(user: user, collectionName: "SwiftPerson")
+        let collection = try setupMongoCollection(user: user, for: SwiftPerson.self)
 
         if disableRecoveryMode {
             // Disable recovery mode on the server.
@@ -494,50 +496,31 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
             updateAllPeopleSubscription(subscriptions)
         }
 
-        // Create an object on the server which should be present after client reset
-        let serverObject: Document = [
-            "_id": .objectId(ObjectId.generate()),
-            "firstName": .string("Paul"),
-            "lastName": .string("M"),
-            "age": .int32(30)
-        ]
-        collection.insertOne(serverObject).await(self, timeout: 30.0)
-
         // Sync is disabled, block executed, sync re-enabled
         try executeBlockOffline(flexibleSync: true, appId: appId) {
             var configuration = user.flexibleSyncConfiguration()
             configuration.objectTypes = [SwiftPerson.self]
             let realm = try Realm(configuration: configuration)
-            realm.syncSession!.suspend()
+            let syncSession = realm.syncSession!
+            syncSession.suspend()
 
-            // There is enough time between the collection insert and the server
-            // being turned off for the subscription sync to sync "Paul M".
-            if realm.objects(SwiftPerson.self).count > 0 {
-                try realm.write {
-                    realm.deleteAll()
-                }
-            }
-
-            // Add an object to the local realm that will not be in the server realm (because sync is disabled).
             try realm.write {
+                // Add an object to the local realm that will not be in the server realm (because sync is disabled).
                 realm.add(SwiftPerson(firstName: "John", lastName: "L"))
             }
             XCTAssertEqual(realm.objects(SwiftPerson.self).count, 1)
         }
 
-        // After restarting sync, the sync history translator service needs time
-        // to resynthesize the new history from existing objects on the server
-        // The following creates a new realm with the same partition and wait for
-        // downloads to ensure the the new history has been created.
-        try autoreleasepool {
-            var newConfig = user.flexibleSyncConfiguration()
-            newConfig.fileURL = RLMTestRealmURL()
-            newConfig.objectTypes = [SwiftPerson.self]
-            let newRealm = try Realm(configuration: newConfig)
+        // Object created above should not have been synced
+        XCTAssertEqual(collection.count(filter: [:]).await(self), 0)
 
-            let subscriptions = newRealm.subscriptions
-            updateAllPeopleSubscription(subscriptions)
-            waitForServerHistoryAfterRestart(realm: newRealm)
+        autoreleasepool {
+            var config = user.flexibleSyncConfiguration { subscriptions in
+                subscriptions.append(QuerySubscription<SwiftPerson>(name: "all_people"))
+            }
+            config.fileURL = RLMTestRealmURL()
+            config.objectTypes = [SwiftPerson.self]
+            waitForServerHistoryAfterRestart(config: config, collection: collection)
         }
 
         return (user, appId)
@@ -918,16 +901,98 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
             XCTAssertEqual(realm.objects(SwiftPerson.self)[0].firstName, "John")
             XCTAssertEqual(realm.objects(SwiftPerson.self)[1].firstName, "Paul")
         }
+
+        // Wait for the recovered object to be processed by the translator as
+        // otherwise it'll show up in the middle of later tests
+        waitForCollectionCount(user.collection(for: SwiftPerson.self), 2)
+    }
+
+    func testClientResetRecoverAsyncOpen() throws {
+        let user = try logInUser(for: basicCredentials())
+        try prepareClientReset(#function, user)
+
+        let (assertBeforeBlock, assertAfterBlock) = assertRecover()
+        var configuration = user.configuration(partitionValue: #function, clientResetMode: .recoverUnsyncedChanges(beforeReset: assertBeforeBlock, afterReset: assertAfterBlock))
+        configuration.objectTypes = [SwiftPerson.self]
+
+        let syncConfig = try XCTUnwrap(configuration.syncConfiguration)
+        switch syncConfig.clientResetMode {
+        case .recoverUnsyncedChanges(let before, let after):
+            XCTAssertNotNil(before)
+            XCTAssertNotNil(after)
+        default:
+            XCTFail("Should be set to recover")
+        }
+        autoreleasepool {
+            let realm = Realm.asyncOpen(configuration: configuration).await(self)
+            XCTAssertEqual(realm.objects(SwiftPerson.self).count, 2)
+            // The object created locally (John) and the object created on the server (Paul)
+            // should both be integrated into the new realm file.
+            XCTAssertEqual(realm.objects(SwiftPerson.self)[0].firstName, "John")
+            XCTAssertEqual(realm.objects(SwiftPerson.self)[1].firstName, "Paul")
+            waitForExpectations(timeout: 15.0)
+        }
+
+        // Wait for the recovered object to be processed by the translator as
+        // otherwise it'll show up in the middle of later tests
+        waitForCollectionCount(user.collection(for: SwiftPerson.self), 2)
+    }
+
+    func testClientResetRecoverWithSchemaChanges() throws {
+        let user = try logInUser(for: basicCredentials())
+        try prepareClientReset(#function, user)
+
+        let beforeCallbackEx = expectation(description: "before reset callback")
+        @Sendable func beforeClientReset(_ before: Realm) {
+            let person = before.objects(SwiftPersonWithAdditionalProperty.self).first!
+            XCTAssertEqual(person.objectSchema.properties.map(\.name),
+                           ["_id", "firstName", "lastName", "age", "newProperty"])
+            XCTAssertEqual(person.newProperty, 0)
+            beforeCallbackEx.fulfill()
+        }
+        let afterCallbackEx = expectation(description: "after reset callback")
+        @Sendable func afterClientReset(_ before: Realm, _ after: Realm) {
+            let beforePerson = before.objects(SwiftPersonWithAdditionalProperty.self).first!
+            XCTAssertEqual(beforePerson.objectSchema.properties.map(\.name),
+                           ["_id", "firstName", "lastName", "age", "newProperty"])
+            XCTAssertEqual(beforePerson.newProperty, 0)
+            let afterPerson = after.objects(SwiftPersonWithAdditionalProperty.self).first!
+            XCTAssertEqual(afterPerson.objectSchema.properties.map(\.name),
+                           ["_id", "firstName", "lastName", "age", "newProperty"])
+            XCTAssertEqual(afterPerson.newProperty, 0)
+
+            // Fulfill on the main thread to make it harder to hit a race
+            // condition where the test completes before the client reset finishes
+            // unwinding. This does not fully fix the problem.
+            DispatchQueue.main.async {
+                afterCallbackEx.fulfill()
+            }
+        }
+
+        var configuration = user.configuration(partitionValue: #function, clientResetMode: .recoverUnsyncedChanges(beforeReset: beforeClientReset, afterReset: afterClientReset))
+        configuration.objectTypes = [SwiftPersonWithAdditionalProperty.self]
+
+        autoreleasepool {
+            _ = Realm.asyncOpen(configuration: configuration).await(self)
+            waitForExpectations(timeout: 15.0)
+        }
+
+        // Wait for the recovered object to be processed by the translator as
+        // otherwise it'll show up in the middle of later tests
+        waitForCollectionCount(user.collection(for: SwiftPerson.self), 2)
+
     }
 
     func testClientResetRecoverOrDiscardLocalFailedRecovery() throws {
+        let appId = try RealmServer.shared.createApp()
         // Disable recovery mode on the server.
         // This attempts to simulate a case where recovery mode fails when
         // using RecoverOrDiscardLocal
         try waitForEditRecoveryMode(appId: appId, disable: true)
 
-        let user = try logInUser(for: basicCredentials())
-        try prepareClientReset(#function, user)
+        let app = app(withId: appId)
+        let user = try logInUser(for: basicCredentials(app: app), app: app)
+        try prepareClientReset(#function, user, appId: appId)
 
         // Expect the recovery to fail back to discardLocal logic
         let (assertBeforeBlock, assertAfterBlock) = assertDiscardLocal()
@@ -953,7 +1018,8 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
             // while the one from the server ("Paul") should be present.
             XCTAssertEqual(realm.objects(SwiftPerson.self)[0].firstName, "Paul")
         }
-        try waitForEditRecoveryMode(appId: appId, disable: false)
+
+        try RealmServer.shared.deleteApp(appId)
     }
 
     @available(*, deprecated) // .discardLocal
@@ -1355,12 +1421,19 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         }
         waitForUploads(for: realm)
 
-        XCTAssertGreaterThan(downloadCount.wrappedValue, 1)
-        XCTAssertGreaterThan(uploadCount.wrappedValue, 1)
-
         tokenDownload!.invalidate()
         tokenUpload!.invalidate()
         RLMSyncSession.notificationsQueue().sync { }
+
+        XCTAssertGreaterThan(downloadCount.wrappedValue, 1)
+        XCTAssertGreaterThan(uploadCount.wrappedValue, 1)
+
+        // There's inherently a race condition here: notification callbacks can
+        // be called up to one more time after they're invalidated if the sync
+        // worker thread is in the middle of processing a change at the time
+        // that the invalidation is requested, and there's no way to wait for that.
+        // This whole test takes 250ms, so we don't need a very long sleep.
+        Thread.sleep(forTimeInterval: 0.2)
 
         downloadCount.wrappedValue = 0
         uploadCount.wrappedValue = 0
@@ -1372,7 +1445,8 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         }
         waitForUploads(for: realm)
 
-        // We check that the notification block is not called after we reset the counters on the notifiers and call invalidated().
+        // We check that the notification block is not called after we reset the
+        // counters on the notifiers and call invalidated().
         XCTAssertEqual(downloadCount.wrappedValue, 0)
         XCTAssertEqual(uploadCount.wrappedValue, 0)
     }
@@ -1505,19 +1579,24 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         waitForExpectations(timeout: 10.0, handler: nil)
     }
 
-    func testAsyncOpenTimeout() throws {
-        let proxy = TimeoutProxyServer(port: 5678, targetPort: 9090)
-        try proxy.start()
-
+    func config(baseURL: String, transport: RLMNetworkTransport, syncTimeouts: SyncTimeoutOptions? = nil) throws -> (String, Realm.Configuration) {
         let appId = try RealmServer.shared.createApp()
-        let appConfig = AppConfiguration(baseURL: "http://localhost:5678",
-                                         transport: AsyncOpenConnectionTimeoutTransport(),
-                                         syncTimeouts: .init(connectTimeout: 2000, connectionLingerTime: 1))
+        let appConfig = AppConfiguration(baseURL: baseURL, transport: transport, syncTimeouts: syncTimeouts)
         let app = App(id: appId, configuration: appConfig)
 
         let user = try logInUser(for: basicCredentials(app: app), app: app)
         var config = user.configuration(partitionValue: #function, cancelAsyncOpenOnNonFatalErrors: true)
         config.objectTypes = []
+        return (appId, config)
+    }
+
+    func testAsyncOpenTimeout() throws {
+        let proxy = TimeoutProxyServer(port: 5678, targetPort: 9090)
+        try proxy.start()
+
+        let (appId, config) = try config(baseURL: "http://localhost:5678",
+                                         transport: AsyncOpenConnectionTimeoutTransport(),
+                                         syncTimeouts: .init(connectTimeout: 2000, connectionLingerTime: 1))
 
         // Two second timeout with a one second delay should work
         autoreleasepool {
@@ -1556,6 +1635,42 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         }
 
         proxy.stop()
+        try RealmServer.shared.deleteApp(appId)
+    }
+
+    class LocationOverrideTransport: RLMNetworkTransport {
+        let hostname: String
+        let wsHostname: String
+        init(hostname: String = "http://localhost:9090", wsHostname: String = "ws://invalid.com:9090") {
+            self.hostname = hostname
+            self.wsHostname = wsHostname
+        }
+
+        override func sendRequest(toServer request: RLMRequest, completion: @escaping RLMNetworkTransportCompletionBlock) {
+            if request.url.hasSuffix("location") {
+                let response = RLMResponse()
+                response.httpStatusCode = 200
+                response.body = "{\"deployment_model\":\"GLOBAL\",\"location\":\"US-VA\",\"hostname\":\"\(hostname)\",\"ws_hostname\":\"\(wsHostname)\"}"
+                completion(response)
+            } else {
+                super.sendRequest(toServer: request, completion: completion)
+            }
+        }
+    }
+
+    func testDNSError() throws {
+        let (appId, config) = try config(baseURL: "http://localhost:9090", transport: LocationOverrideTransport(wsHostname: "ws://invalid.com:9090"))
+        Realm.asyncOpen(configuration: config).awaitFailure(self, timeout: 40) { error in
+            assertSyncError(error, .connectionFailed, "Failed to connect to sync: Host not found (authoritative)")
+        }
+        try RealmServer.shared.deleteApp(appId)
+    }
+
+    func testTLSError() throws {
+        let (appId, config) = try config(baseURL: "http://localhost:9090", transport: LocationOverrideTransport(wsHostname: "wss://localhost:9090"))
+        Realm.asyncOpen(configuration: config).awaitFailure(self) { error in
+            assertSyncError(error, .tlsHandshakeFailed, "TLS handshake failed: SecureTransport error: record overflow (-9847)")
+        }
         try RealmServer.shared.deleteApp(appId)
     }
 
@@ -1626,7 +1741,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         let blockCalled = Locked(false)
         let ex = expectation(description: "Error callback should fire upon receiving an error")
         app.syncManager.errorHandler = { @Sendable (error, _) in
-            assertSyncError(error, .clientUserError, "Unable to refresh the user access token.")
+            assertSyncError(error, .clientUserError, "Unable to refresh the user access token: signature is invalid")
             blockCalled.value = true
             ex.fulfill()
         }
@@ -1650,9 +1765,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
     // MARK: - App tests
 
     private func appConfig() -> AppConfiguration {
-        return AppConfiguration(baseURL: "http://localhost:9090",
-                                localAppName: "auth-integration-tests",
-                                localAppVersion: "20180301")
+        return AppConfiguration(baseURL: "http://localhost:9090")
     }
 
     func expectSuccess<T>(_ result: Result<T, Error>) -> T? {
@@ -1724,7 +1837,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         let ex = expectation(description: "Error callback should fire upon receiving an error")
         ex.assertForOverFulfill = false // error handler can legally be called multiple times
         app.syncManager.errorHandler = { @Sendable (error, _) in
-            assertSyncError(error, .clientUserError, "Unable to refresh the user access token.")
+            assertSyncError(error, .clientUserError, "Unable to refresh the user access token: invalid session: failed to find refresh token")
             ex.fulfill()
         }
 
@@ -2223,7 +2336,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
     }
 
     func testVerifyDocumentsWithCustomColumnNames() throws {
-        let collection = try setupMongoCollection(for: "SwiftCustomColumnObject")
+        let collection = try setupMongoCollection(for: SwiftCustomColumnObject.self)
         let objectId = ObjectId.generate()
         let linkedObjectId = ObjectId.generate()
 
@@ -2240,12 +2353,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
             realm.add(object)
         }
         waitForUploads(for: realm)
-
-        let waitStart = Date()
-        while collection.count(filter: [:]).await(self) != 2 && waitStart.timeIntervalSinceNow > -600.0 {
-            sleep(5)
-        }
-        XCTAssertEqual(collection.count(filter: [:]).await(self), 2)
+        waitForCollectionCount(collection, 2)
 
         let filter: Document = ["_id": .objectId(objectId)]
         collection.findOneDocument(filter: filter)
@@ -2328,7 +2436,7 @@ class AnyRealmValueSyncTests: SwiftSyncTestCase {
 // results in a warning about it being redundant due to the enclosing check, so
 // it needs to be out of line.
 func hasCombine() -> Bool {
-    if #available(OSX 10.15, watchOS 6.0, iOS 13.0, iOSApplicationExtension 13.0, OSXApplicationExtension 10.15, tvOS 13.0, *) {
+    if #available(macOS 10.15, watchOS 6.0, iOS 13.0, tvOS 13.0, *) {
         return true
     }
     return false
@@ -2354,7 +2462,7 @@ class CombineObjectServerTests: SwiftSyncTestCase {
 
     // swiftlint:disable multiple_closures_with_trailing_closure
     func testWatchCombine() throws {
-        let collection = try setupMongoCollection(for: "Dog")
+        let collection = try setupMongoCollection(for: Dog.self)
         let document: Document = ["name": "fido", "breed": "cane corso"]
 
         let watchEx1 = Locked(expectation(description: "Main thread watch"))
@@ -2396,7 +2504,7 @@ class CombineObjectServerTests: SwiftSyncTestCase {
     }
 
     func testWatchCombineWithFilterIds() throws {
-        let collection = try setupMongoCollection(for: "Dog")
+        let collection = try setupMongoCollection(for: Dog.self)
         let document: Document = ["name": "fido", "breed": "cane corso"]
         let document2: Document = ["name": "rex", "breed": "cane corso"]
         let document3: Document = ["name": "john", "breed": "cane corso"]
@@ -2466,7 +2574,7 @@ class CombineObjectServerTests: SwiftSyncTestCase {
     }
 
     func testWatchCombineWithMatchFilter() throws {
-        let collection = try setupMongoCollection(for: "Dog")
+        let collection = try setupMongoCollection(for: Dog.self)
         let document: Document = ["name": "fido", "breed": "cane corso"]
         let document2: Document = ["name": "rex", "breed": "cane corso"]
         let document3: Document = ["name": "john", "breed": "cane corso"]
@@ -2648,7 +2756,7 @@ class CombineObjectServerTests: SwiftSyncTestCase {
     }
 
     func testMongoCollectionInsertCombine() throws {
-        let collection = try setupMongoCollection(for: "Dog")
+        let collection = try setupMongoCollection(for: Dog.self)
         let document: Document = ["name": "fido", "breed": "cane corso"]
         let document2: Document = ["name": "rex", "breed": "tibetan mastiff"]
 
@@ -2664,7 +2772,7 @@ class CombineObjectServerTests: SwiftSyncTestCase {
     }
 
     func testMongoCollectionFindCombine() throws {
-        let collection = try setupMongoCollection(for: "Dog")
+        let collection = try setupMongoCollection(for: Dog.self)
         let document: Document = ["name": "fido", "breed": "cane corso"]
         let document2: Document = ["name": "rex", "breed": "tibetan mastiff"]
         let document3: Document = ["name": "rex", "breed": "tibetan mastiff", "coat": ["fawn", "brown", "white"]]
@@ -2694,7 +2802,7 @@ class CombineObjectServerTests: SwiftSyncTestCase {
     }
 
     func testMongoCollectionCountAndAggregateCombine() throws {
-        let collection = try setupMongoCollection(for: "Dog")
+        let collection = try setupMongoCollection(for: Dog.self)
         let document: Document = ["name": "fido", "breed": "cane corso"]
 
         collection.insertMany([document]).await(self)
@@ -2709,7 +2817,7 @@ class CombineObjectServerTests: SwiftSyncTestCase {
     }
 
     func testMongoCollectionDeleteOneCombine() throws {
-        let collection = try setupMongoCollection(for: "Dog")
+        let collection = try setupMongoCollection(for: Dog.self)
         let document: Document = ["name": "fido", "breed": "cane corso"]
         let document2: Document = ["name": "rex", "breed": "cane corso"]
 
@@ -2723,7 +2831,7 @@ class CombineObjectServerTests: SwiftSyncTestCase {
     }
 
     func testMongoCollectionDeleteManyCombine() throws {
-        let collection = try setupMongoCollection(for: "Dog")
+        let collection = try setupMongoCollection(for: Dog.self)
         let document: Document = ["name": "fido", "breed": "cane corso"]
         let document2: Document = ["name": "rex", "breed": "cane corso"]
 
@@ -2737,7 +2845,7 @@ class CombineObjectServerTests: SwiftSyncTestCase {
     }
 
     func testMongoCollectionUpdateOneCombine() throws {
-        let collection = try setupMongoCollection(for: "Dog")
+        let collection = try setupMongoCollection(for: Dog.self)
         let document: Document = ["name": "fido", "breed": "cane corso"]
         let document2: Document = ["name": "rex", "breed": "cane corso"]
         let document3: Document = ["name": "john", "breed": "cane corso"]
@@ -2759,7 +2867,7 @@ class CombineObjectServerTests: SwiftSyncTestCase {
     }
 
     func testMongoCollectionUpdateManyCombine() throws {
-        let collection = try setupMongoCollection(for: "Dog")
+        let collection = try setupMongoCollection(for: Dog.self)
         let document: Document = ["name": "fido", "breed": "cane corso"]
         let document2: Document = ["name": "rex", "breed": "cane corso"]
         let document3: Document = ["name": "john", "breed": "cane corso"]
@@ -2780,7 +2888,7 @@ class CombineObjectServerTests: SwiftSyncTestCase {
     }
 
     func testMongoCollectionFindAndUpdateCombine() throws {
-        let collection = try setupMongoCollection(for: "Dog")
+        let collection = try setupMongoCollection(for: Dog.self)
         let document: Document = ["name": "fido", "breed": "cane corso"]
         let document2: Document = ["name": "rex", "breed": "cane corso"]
         let document3: Document = ["name": "john", "breed": "cane corso"]
@@ -2807,7 +2915,7 @@ class CombineObjectServerTests: SwiftSyncTestCase {
     }
 
     func testMongoCollectionFindAndReplaceCombine() throws {
-        let collection = try setupMongoCollection(for: "Dog")
+        let collection = try setupMongoCollection(for: Dog.self)
         let document: Document = ["name": "fido", "breed": "cane corso"]
         let document2: Document = ["name": "rex", "breed": "cane corso"]
         let document3: Document = ["name": "john", "breed": "cane corso"]
@@ -2832,7 +2940,7 @@ class CombineObjectServerTests: SwiftSyncTestCase {
     }
 
     func testMongoCollectionFindAndDeleteCombine() throws {
-        let collection = try setupMongoCollection(for: "Dog")
+        let collection = try setupMongoCollection(for: Dog.self)
         let document: Document = ["name": "fido", "breed": "cane corso"]
         collection.insertMany([document]).await(self)
 
