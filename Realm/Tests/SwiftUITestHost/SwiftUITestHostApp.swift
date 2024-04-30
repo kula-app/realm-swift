@@ -163,6 +163,7 @@ struct Footer: View {
     }
 }
 
+@MainActor
 struct ContentView: View {
     @State var searchFilter: String = ""
 
@@ -234,12 +235,14 @@ struct UnmanagedObjectTestView: View {
         @Environment(\.presentationMode) var presentationMode
         @State var shown = false
         var body: some View {
-            NavigationLink("Next", destination: NestedViewTwo(reminderList: reminderList)).onAppear {
-                if shown {
-                    presentationMode.wrappedValue.dismiss()
+            NavigationLink("Next", destination: NestedViewTwo(reminderList: reminderList))
+                .isDetailLink(false)
+                .onAppear {
+                    if shown {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    shown = true
                 }
-                shown = true
-            }
         }
     }
     @ObservedRealmObject var reminderList = ReminderList()
@@ -251,6 +254,7 @@ struct UnmanagedObjectTestView: View {
             Form {
                 TextField("name", text: $reminderList.name).accessibilityIdentifier("name")
                 NavigationLink("test", destination: NestedViewOne(reminderList: reminderList), isActive: $passToNestedView)
+                    .isDetailLink(false)
             }.navigationBarItems(trailing: Button("Add", action: {
                 try! realm.write { realm.add(reminderList) }
                 passToNestedView = true
