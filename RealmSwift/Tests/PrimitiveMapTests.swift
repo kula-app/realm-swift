@@ -20,6 +20,10 @@ import XCTest
 import Realm
 import RealmSwift
 
+#if canImport(RealmSwiftTestSupport)
+import RealmSwiftTestSupport
+#endif
+
 // swiftlint:disable cyclomatic_complexity
 
 class PrimitiveMapTestsBase<O: ObjectFactory, V: MapValueFactory>: TestCase {
@@ -58,6 +62,7 @@ class PrimitiveMapTests<O: ObjectFactory, V: MapValueFactory>: PrimitiveMapTests
         }
     }
 
+    @MainActor
     func testEnumeration() {
         XCTAssertEqual(0, map.count)
         map.merge(values) { $1 }

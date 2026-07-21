@@ -199,8 +199,9 @@ class CombineRealmTests: CombinePublisherTestCase {
         cancellable = realm.objectWillChange.sink {
             exp.fulfill()
         }
+        let configuration = self.realm.configuration
         subscribeOnQueue.async {
-            let backgroundRealm = try! Realm(configuration: self.realm.configuration)
+            let backgroundRealm = try! Realm(configuration: configuration)
             try! backgroundRealm.write {
                 backgroundRealm.create(SwiftIntObject.self)
             }
@@ -293,7 +294,7 @@ class CombineObjectPublisherTests: CombinePublisherTestCase {
             }
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 XCTAssertEqual(arr.count, 10)
                 sema.signal()
             }
@@ -560,7 +561,7 @@ class CombineObjectPublisherTests: CombinePublisherTestCase {
             .freeze()
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 var prev: SwiftIntObject?
                 for change in arr {
                     guard case .change(let obj, let properties) = change else {
@@ -595,7 +596,7 @@ class CombineObjectPublisherTests: CombinePublisherTestCase {
             .receive(on: receiveOnQueue)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for change in arr {
                     guard case .change(let obj, let properties) = change else {
                         XCTFail("Expected .change but got \(change)")
@@ -629,7 +630,7 @@ class CombineObjectPublisherTests: CombinePublisherTestCase {
             .receive(on: receiveOnQueue)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 var prev: SwiftIntObject?
                 for change in arr {
                     guard case .change(let obj, let properties) = change else {
@@ -785,6 +786,24 @@ private protocol CombineTestCollection {
 
 // MARK: - List, MutableSet
 
+private func checkChangeset<Collection: RealmCollection>(_ change: RealmCollectionChange<Collection>, calls: Int, frozen: Bool = false) {
+    switch change {
+    case .initial(let collection):
+        XCTAssertEqual(collection.isFrozen, frozen)
+        XCTAssertEqual(calls, 0)
+        XCTAssertEqual(collection.count, 0)
+    case .update(let collection, deletions: let deletions, insertions: let insertions,
+                 modifications: let modifications):
+        XCTAssertEqual(collection.isFrozen, frozen)
+        XCTAssertEqual(collection.count, calls)
+        XCTAssertEqual(insertions, [calls - 1])
+        XCTAssertEqual(deletions, [])
+        XCTAssertEqual(modifications, [])
+    case .error(let error):
+        XCTFail("Unexpected error \(error)")
+    }
+}
+
 @available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *)
 private class CombineCollectionPublisherTests<Collection: RealmCollection>: CombinePublisherTestCase
         where Collection: CombineTestCollection, Collection: RealmSubscribable {
@@ -870,30 +889,12 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
         }
     }
 
-    func checkChangeset(_ change: RealmCollectionChange<Collection>, calls: Int, frozen: Bool = false) {
-        switch change {
-        case .initial(let collection):
-            XCTAssertEqual(collection.isFrozen, frozen)
-            XCTAssertEqual(calls, 0)
-            XCTAssertEqual(collection.count, 0)
-        case .update(let collection, deletions: let deletions, insertions: let insertions,
-                     modifications: let modifications):
-            XCTAssertEqual(collection.isFrozen, frozen)
-            XCTAssertEqual(collection.count, calls)
-            XCTAssertEqual(insertions, [calls - 1])
-            XCTAssertEqual(deletions, [])
-            XCTAssertEqual(modifications, [])
-        case .error(let error):
-            XCTFail("Unexpected error \(error)")
-        }
-    }
-
     func testChangeSet() {
         var exp = XCTestExpectation(description: "initial")
         var calls = 0
         cancellable = collection.changesetPublisher
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 exp.fulfill()
             }
@@ -913,7 +914,7 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
             .changesetPublisher
             .saveToken(on: self, at: \.notificationToken)
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 exp.fulfill()
             }
@@ -962,44 +963,44 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
             sema.wait()
         }
     }
+
     func testSubscribeOnKeyPath() {
         var ex = expectation(description: "initial notification")
 
         cancellable = collection.collectionPublisher(keyPaths: collection.includedKeyPath)
             .subscribe(on: subscribeOnQueue)
             .assertNoFailure()
-            .sink { _ in
-                ex.fulfill()
+            .sink { _ in ex.fulfill()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.appendObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.modifyObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
     }
+
     func testSubscribeOnKeyPathNoChange() {
         var ex = expectation(description: "initial notification")
 
         cancellable = collection.collectionPublisher(keyPaths: collection.excludedKeyPath)
             .subscribe(on: subscribeOnQueue)
             .assertNoFailure()
-            .sink { _ in
-                ex.fulfill()
+            .sink { _ in ex.fulfill()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.appendObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "no change notification")
         ex.isInverted = true
         try! realm.write { collection.modifyObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
     }
 
     func testSubscribeOnWithToken() {
@@ -1073,7 +1074,7 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
         cancellable = collection.changesetPublisher
             .subscribe(on: subscribeOnQueue)
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 sema.signal()
         }
@@ -1090,18 +1091,16 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
 
         cancellable = collection.changesetPublisher(keyPaths: collection.includedKeyPath)
             .subscribe(on: subscribeOnQueue)
-            .sink { _ in
-                ex.fulfill()
-        }
-        waitForExpectations(timeout: 1.0, handler: nil)
+            .sink { _ in ex.fulfill() }
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.appendObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.modifyObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
     }
 
     func testChangeSetSubscribeOnKeyPathNoChange() {
@@ -1109,19 +1108,17 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
 
         cancellable = collection.changesetPublisher(keyPaths: collection.excludedKeyPath)
             .subscribe(on: subscribeOnQueue)
-            .sink { _ in
-                ex.fulfill()
-        }
-        waitForExpectations(timeout: 1.0, handler: nil)
+            .sink { _ in ex.fulfill() }
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.appendObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "no change notification")
         ex.isInverted = true
         try! realm.write { collection.modifyObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
     }
 
     func testChangeSetSubscribeOnWithToken() {
@@ -1132,7 +1129,7 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
             .subscribe(on: subscribeOnQueue)
             .saveToken(on: self, at: \.notificationToken)
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 sema.signal()
         }
@@ -1151,7 +1148,7 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
         cancellable = collection.changesetPublisher
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 exp.fulfill()
         }
@@ -1172,7 +1169,7 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
             .saveToken(on: self, at: \.notificationToken)
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 exp.fulfill()
         }
@@ -1216,7 +1213,7 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
             .threadSafeReference()
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 exp.fulfill()
         }
@@ -1239,7 +1236,7 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
             .threadSafeReference()
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 exp.fulfill()
         }
@@ -1284,10 +1281,10 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
             .signal(sema)
             .prefix(10)
             .collect()
-            .sink { arr in
+            .sink { @Sendable arr in
                 XCTAssertEqual(arr.count, 10)
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, calls: i, frozen: true)
+                    checkChangeset(change, calls: i, frozen: true)
                 }
                 sema.signal()
             }
@@ -1307,10 +1304,10 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 XCTAssertEqual(arr.count, 10)
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, calls: i, frozen: true)
+                    checkChangeset(change, calls: i, frozen: true)
                 }
                 exp.fulfill()
         }
@@ -1331,9 +1328,9 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, calls: i, frozen: true)
+                    checkChangeset(change, calls: i, frozen: true)
                 }
                 sema.signal()
         }
@@ -1354,7 +1351,7 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for (i, collection) in arr.enumerated() {
                     XCTAssertTrue(collection.isFrozen)
                     XCTAssertEqual(collection.count, i)
@@ -1377,9 +1374,9 @@ private class CombineCollectionPublisherTests<Collection: RealmCollection>: Comb
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, calls: i, frozen: true)
+                    checkChangeset(change, calls: i, frozen: true)
                 }
                 exp.fulfill()
         }
@@ -1542,6 +1539,24 @@ class AnyRealmCollectionPublisherTests: TestCase {
 
 // MARK: - Map
 
+private func checkChangeset<Collection: RealmKeyedCollection>(_ change: RealmMapChange<Collection>, calls: Int, frozen: Bool = false) {
+    switch change {
+    case .initial(let collection):
+        XCTAssertEqual(collection.isFrozen, frozen)
+        XCTAssertEqual(calls, 0)
+        XCTAssertEqual(collection.count, 0)
+    case .update(let collection, deletions: let deletions, insertions: let insertions, modifications: let modifications):
+        XCTAssertEqual(collection.isFrozen, frozen)
+        XCTAssertEqual(collection.count, calls)
+        // one insertion at a time
+        XCTAssertEqual(insertions.count, 1)
+        XCTAssertEqual(modifications, [])
+        XCTAssertEqual(deletions, [])
+    case .error(let error):
+        XCTFail("Unexpected error \(error)")
+    }
+}
+
 @available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *)
 private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: CombinePublisherTestCase
         where Collection: CombineTestCollection, Collection: RealmSubscribable {
@@ -1627,30 +1642,12 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
         }
     }
 
-    func checkChangeset(_ change: RealmMapChange<Collection>, calls: Int, frozen: Bool = false) {
-        switch change {
-        case .initial(let collection):
-            XCTAssertEqual(collection.isFrozen, frozen)
-            XCTAssertEqual(calls, 0)
-            XCTAssertEqual(collection.count, 0)
-        case .update(let collection, deletions: let deletions, insertions: let insertions, modifications: let modifications):
-            XCTAssertEqual(collection.isFrozen, frozen)
-            XCTAssertEqual(collection.count, calls)
-            // one insertion at a time
-            XCTAssertEqual(insertions.count, 1)
-            XCTAssertEqual(modifications, [])
-            XCTAssertEqual(deletions, [])
-        case .error(let error):
-            XCTFail("Unexpected error \(error)")
-        }
-    }
-
     func testChangeSet() {
         var exp = XCTestExpectation(description: "initial")
         var calls = 0
         cancellable = collection.changesetPublisher
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 exp.fulfill()
             }
@@ -1670,7 +1667,7 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
             .changesetPublisher
             .saveToken(on: self, at: \.notificationToken)
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 exp.fulfill()
             }
@@ -1726,18 +1723,17 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
         cancellable = collection.collectionPublisher(keyPaths: collection.includedKeyPath)
             .subscribe(on: subscribeOnQueue)
             .assertNoFailure()
-            .sink { _ in
-                ex.fulfill()
+            .sink { _ in ex.fulfill()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.appendObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.modifyObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
     }
 
     func testSubscribeOnKeyPathNoChange() {
@@ -1746,19 +1742,18 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
         cancellable = collection.collectionPublisher(keyPaths: collection.excludedKeyPath)
             .subscribe(on: subscribeOnQueue)
             .assertNoFailure()
-            .sink { _ in
-                ex.fulfill()
+            .sink { _ in ex.fulfill()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.appendObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "no change notification")
         ex.isInverted = true
         try! realm.write { collection.modifyObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
     }
 
     func testSubscribeOnWithToken() {
@@ -1832,7 +1827,7 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
         cancellable = collection.changesetPublisher
             .subscribe(on: subscribeOnQueue)
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 sema.signal()
         }
@@ -1849,18 +1844,17 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
 
         cancellable = collection.changesetPublisher(keyPaths: collection.includedKeyPath)
             .subscribe(on: subscribeOnQueue)
-            .sink { _ in
-                ex.fulfill()
+            .sink { _ in ex.fulfill()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.appendObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.modifyObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
     }
 
     func testChangeSetSubscribeOnKeyPathNoChange() {
@@ -1868,19 +1862,18 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
 
         cancellable = collection.changesetPublisher(keyPaths: collection.excludedKeyPath)
             .subscribe(on: subscribeOnQueue)
-            .sink { _ in
-                ex.fulfill()
+            .sink { _ in ex.fulfill()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.appendObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "no change notification")
         ex.isInverted = true
         try! realm.write { collection.modifyObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
     }
 
     func testChangeSetSubscribeOnWithToken() {
@@ -1891,7 +1884,7 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
             .subscribe(on: subscribeOnQueue)
             .saveToken(on: self, at: \.notificationToken)
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 sema.signal()
         }
@@ -1910,7 +1903,7 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
         cancellable = collection.changesetPublisher
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 exp.fulfill()
         }
@@ -1931,7 +1924,7 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
             .saveToken(on: self, at: \.notificationToken)
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 exp.fulfill()
         }
@@ -1975,7 +1968,7 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
             .threadSafeReference()
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 exp.fulfill()
         }
@@ -1998,7 +1991,7 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
             .threadSafeReference()
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, calls: calls)
+                checkChangeset(change, calls: calls)
                 calls += 1
                 exp.fulfill()
         }
@@ -2042,9 +2035,9 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
             .signal(sema)
             .prefix(10)
             .collect()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, calls: i, frozen: true)
+                    checkChangeset(change, calls: i, frozen: true)
                 }
                 sema.signal()
             }
@@ -2064,9 +2057,9 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, calls: i, frozen: true)
+                    checkChangeset(change, calls: i, frozen: true)
                 }
                 exp.fulfill()
         }
@@ -2087,9 +2080,9 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, calls: i, frozen: true)
+                    checkChangeset(change, calls: i, frozen: true)
                 }
                 sema.signal()
         }
@@ -2110,7 +2103,7 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for (i, collection) in arr.enumerated() {
                     XCTAssertTrue(collection.isFrozen)
                     XCTAssertEqual(collection.count, i)
@@ -2133,9 +2126,9 @@ private class CombineMapPublisherTests<Collection: RealmKeyedCollection>: Combin
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, calls: i, frozen: true)
+                    checkChangeset(change, calls: i, frozen: true)
                 }
                 exp.fulfill()
         }
@@ -2186,6 +2179,21 @@ protocol RealmSectionedObject: ObjectBase {
 
 extension ModernAllTypesObject: RealmSectionedObject {
     var key: Int8 { int8Col } // This property will never change.
+}
+
+private func checkChangeset<SectionedResults: RealmSectionedResult>(
+    _ change: SectionedResultsChange<SectionedResults>,
+    insertions: [IndexPath] = [], deletions: [IndexPath] = [], frozen: Bool = false) {
+    switch change {
+    case .initial(let collection):
+        XCTAssertEqual(collection.isFrozen, frozen)
+    case .update(let collection, deletions: let del, insertions: let ins,
+                 modifications: let modifications, _, _):
+        XCTAssertEqual(collection.isFrozen, frozen)
+        XCTAssertEqual(ins, insertions)
+        XCTAssertEqual(del, deletions)
+        XCTAssertEqual(modifications, [])
+    }
 }
 
 @available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *)
@@ -2338,28 +2346,13 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
         }
     }
 
-    func checkChangeset<SectionedResults: RealmSectionedResult>(
-            _ change: SectionedResultsChange<SectionedResults>,
-            insertions: [IndexPath] = [], deletions: [IndexPath] = [], frozen: Bool = false) {
-        switch change {
-        case .initial(let collection):
-            XCTAssertEqual(collection.isFrozen, frozen)
-        case .update(let collection, deletions: let del, insertions: let ins,
-                     modifications: let modifications, _, _):
-            XCTAssertEqual(collection.isFrozen, frozen)
-            XCTAssertEqual(ins, insertions)
-            XCTAssertEqual(del, deletions)
-            XCTAssertEqual(modifications, [])
-        }
-    }
-
     func testChangeSet() {
         var exp = XCTestExpectation(description: "initial")
         var calls = 0
         let sectionedResults = collection.sectioned(by: \.key)
         cancellable = sectionedResults.changesetPublisher
             .sink { change in
-                self.checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
+                checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
                 calls += 1
                 exp.fulfill()
             }
@@ -2375,7 +2368,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
         var sectionCalls = 10
         cancellable = sectionedResults[0].changesetPublisher
             .sink { change in
-                self.checkChangeset(change, deletions: [IndexPath(item: sectionCalls, section: 0)])
+                checkChangeset(change, deletions: [IndexPath(item: sectionCalls, section: 0)])
                 sectionCalls -= 1
                 sectionExp.fulfill()
             }
@@ -2394,7 +2387,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .changesetPublisher
             .saveToken(on: self, at: \.notificationToken)
             .sink { change in
-                self.checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
+                checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
                 calls += 1
                 exp.fulfill()
             }
@@ -2414,7 +2407,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .changesetPublisher
             .saveToken(on: self, at: \.notificationToken)
             .sink { change in
-                self.checkChangeset(change, deletions: [IndexPath(item: sectionCalls, section: 0)])
+                checkChangeset(change, deletions: [IndexPath(item: sectionCalls, section: 0)])
                 sectionCalls -= 1
                 sectionExp.fulfill()
             }
@@ -2505,18 +2498,17 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
         cancellable = sectionedResults.collectionPublisher(keyPaths: collection.includedKeyPath)
             .subscribe(on: subscribeOnQueue)
             .assertNoFailure()
-            .sink { _ in
-                ex.fulfill()
+            .sink { _ in ex.fulfill()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.appendObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.modifyObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         cancellable?.cancel()
         var sectionEx = expectation(description: "initial notification")
@@ -2527,15 +2519,15 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .sink { _ in
                 sectionEx.fulfill()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [sectionEx], timeout: 1.0)
 
         sectionEx = expectation(description: "change notification")
         try! realm.write { collection.appendObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [sectionEx], timeout: 1.0)
 
         sectionEx = expectation(description: "change notification")
         try! realm.write { collection.modifyObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [sectionEx], timeout: 1.0)
     }
 
     func testSubscribeOnKeyPathNoChange() {
@@ -2545,19 +2537,18 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
         cancellable = sectionedResults.collectionPublisher(keyPaths: collection.excludedKeyPath)
             .subscribe(on: subscribeOnQueue)
             .assertNoFailure()
-            .sink { _ in
-                ex.fulfill()
+            .sink { _ in ex.fulfill()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.appendObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "no change notification")
         ex.isInverted = true
         try! realm.write { collection.modifyObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         var sectionEx = expectation(description: "initial notification")
         cancellable?.cancel()
@@ -2567,16 +2558,16 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .sink { _ in
                 sectionEx.fulfill()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [sectionEx], timeout: 1.0)
 
         sectionEx = expectation(description: "change notification")
         try! realm.write { collection.appendObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [sectionEx], timeout: 1.0)
 
         sectionEx = expectation(description: "no change notification")
         sectionEx.isInverted = true
         try! realm.write { collection.modifyObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [sectionEx], timeout: 1.0)
     }
 
     func testSubscribeOnWithToken() {
@@ -2721,7 +2712,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .changesetPublisher
             .subscribe(on: subscribeOnQueue)
             .sink { change in
-                self.checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
+                checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
                 calls += 1
                 sema.signal()
         }
@@ -2737,7 +2728,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .changesetPublisher
             .subscribe(on: subscribeOnQueue)
             .sink { change in
-                self.checkChangeset(change, insertions: [IndexPath(item: sectionCalls - 1, section: 0)])
+                checkChangeset(change, insertions: [IndexPath(item: sectionCalls - 1, section: 0)])
                 sectionCalls += 1
                 sema.signal()
         }
@@ -2755,46 +2746,44 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
         cancellable = collection.sectioned(by: \.key)
             .changesetPublisher(keyPaths: collection.includedKeyPath)
             .subscribe(on: subscribeOnQueue)
-            .sink { _ in
-                ex.fulfill()
+            .sink { _ in ex.fulfill()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write {
             collection.appendObject()
 
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write {
             collection.modifyObject()
 
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         var sectionEx = expectation(description: "initial notification")
 
         cancellable = collection.sectioned(by: \.key)[0]
             .changesetPublisher(keyPaths: collection.includedKeyPath)
             .subscribe(on: subscribeOnQueue)
-            .sink { _ in
-                sectionEx.fulfill()
+            .sink { _ in sectionEx.fulfill()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [sectionEx], timeout: 1.0)
 
         sectionEx = expectation(description: "change notification")
         try! realm.write {
             collection.appendObject()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [sectionEx], timeout: 1.0)
 
         sectionEx = expectation(description: "change notification")
         try! realm.write {
             collection.modifyObject()
         }
-        waitForExpectations(timeout: 10.0, handler: nil)
+        wait(for: [sectionEx], timeout: 1.0)
     }
 
     func testChangeSetSubscribeOnKeyPathNoChange() {
@@ -2803,38 +2792,36 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
         cancellable = collection.sectioned(by: \.key)
             .changesetPublisher(keyPaths: collection.excludedKeyPath)
             .subscribe(on: subscribeOnQueue)
-            .sink { _ in
-                ex.fulfill()
+            .sink { _ in ex.fulfill()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "change notification")
         try! realm.write { collection.appendObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         ex = expectation(description: "no change notification")
         ex.isInverted = true
         try! realm.write { collection.modifyObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [ex], timeout: 1.0)
 
         var sectionEx = expectation(description: "initial notification")
 
         cancellable = collection.sectioned(by: \.key)[0]
             .changesetPublisher(keyPaths: collection.excludedKeyPath)
             .subscribe(on: subscribeOnQueue)
-            .sink { _ in
-                sectionEx.fulfill()
+            .sink { _ in sectionEx.fulfill()
         }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [sectionEx], timeout: 1.0)
 
         sectionEx = expectation(description: "change notification")
         try! realm.write { collection.appendObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [sectionEx], timeout: 1.0)
 
         sectionEx = expectation(description: "no change notification")
         sectionEx.isInverted = true
         try! realm.write { collection.modifyObject() }
-        waitForExpectations(timeout: 1.0, handler: nil)
+        wait(for: [sectionEx], timeout: 1.0)
 
     }
 
@@ -2847,7 +2834,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .subscribe(on: subscribeOnQueue)
             .saveToken(on: self, at: \.notificationToken)
             .sink { change in
-                self.checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
+                checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
                 calls += 1
                 sema.signal()
         }
@@ -2866,7 +2853,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .subscribe(on: subscribeOnQueue)
             .saveToken(on: self, at: \.notificationToken)
             .sink { change in
-                self.checkChangeset(change, insertions: [IndexPath(item: sectionCalls - 1, section: 0)])
+                checkChangeset(change, insertions: [IndexPath(item: sectionCalls - 1, section: 0)])
                 sectionCalls += 1
                 sema.signal()
         }
@@ -2886,7 +2873,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .changesetPublisher
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
+                checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
                 calls += 1
                 exp.fulfill()
         }
@@ -2904,7 +2891,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .changesetPublisher
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, insertions: [IndexPath(item: sectionCalls - 1, section: 0)])
+                checkChangeset(change, insertions: [IndexPath(item: sectionCalls - 1, section: 0)])
                 sectionCalls += 1
                 sectionExp.fulfill()
         }
@@ -2926,7 +2913,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .saveToken(on: self, at: \.notificationToken)
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
+                checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
                 calls += 1
                 exp.fulfill()
         }
@@ -2947,7 +2934,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .saveToken(on: self, at: \.notificationToken)
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, insertions: [IndexPath(item: sectionCalls - 1, section: 0)])
+                checkChangeset(change, insertions: [IndexPath(item: sectionCalls - 1, section: 0)])
                 sectionCalls += 1
                 sectionExp.fulfill()
         }
@@ -3018,7 +3005,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .threadSafeReference()
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
+                checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
                 calls += 1
                 exp.fulfill()
         }
@@ -3038,7 +3025,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .threadSafeReference()
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, insertions: [IndexPath(item: sectionCalls - 1, section: 0)])
+                checkChangeset(change, insertions: [IndexPath(item: sectionCalls - 1, section: 0)])
                 sectionCalls += 1
                 sectionExp.fulfill()
         }
@@ -3062,7 +3049,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .threadSafeReference()
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
+                checkChangeset(change, insertions: [IndexPath(item: calls - 1, section: 0)])
                 calls += 1
                 exp.fulfill()
         }
@@ -3085,7 +3072,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .threadSafeReference()
             .receive(on: receiveOnQueue)
             .sink { change in
-                self.checkChangeset(change, insertions: [IndexPath(item: sectionCalls - 1, section: 0)])
+                checkChangeset(change, insertions: [IndexPath(item: sectionCalls - 1, section: 0)])
                 sectionCalls += 1
                 sectionExp.fulfill()
         }
@@ -3132,7 +3119,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 XCTAssertEqual(arr.count, 10)
                 for (i, collection) in arr.enumerated() {
                     XCTAssertTrue(collection.isFrozen)
@@ -3159,10 +3146,10 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .signal(sema)
             .prefix(10)
             .collect()
-            .sink { arr in
+            .sink { @Sendable arr in
                 XCTAssertEqual(arr.count, 10)
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, insertions: [IndexPath(item: i - 1, section: 0)], frozen: true)
+                    checkChangeset(change, insertions: [IndexPath(item: i - 1, section: 0)], frozen: true)
                 }
                 sema.signal()
             }
@@ -3181,10 +3168,10 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .signal(sema)
             .prefix(10)
             .collect()
-            .sink { arr in
+            .sink { @Sendable arr in
                 XCTAssertEqual(arr.count, objectsCount)
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, insertions: [IndexPath(item: (i + objectsCount) - 1, section: 0)], frozen: true)
+                    checkChangeset(change, insertions: [IndexPath(item: (i + objectsCount) - 1, section: 0)], frozen: true)
                 }
                 sema.signal()
             }
@@ -3207,10 +3194,10 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 XCTAssertEqual(arr.count, 10)
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, insertions: [IndexPath(item: i - 1, section: 0)], frozen: true)
+                    checkChangeset(change, insertions: [IndexPath(item: i - 1, section: 0)], frozen: true)
                 }
                 exp.fulfill()
         }
@@ -3228,10 +3215,10 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 XCTAssertEqual(arr.count, objectsCount)
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, insertions: [IndexPath(item: (i + objectsCount) - 1, section: 0)], frozen: true)
+                    checkChangeset(change, insertions: [IndexPath(item: (i + objectsCount) - 1, section: 0)], frozen: true)
                 }
                 sectionExp.fulfill()
         }
@@ -3255,9 +3242,9 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, insertions: [IndexPath(item: i - 1, section: 0)], frozen: true)
+                    checkChangeset(change, insertions: [IndexPath(item: i - 1, section: 0)], frozen: true)
                 }
                 sema.signal()
         }
@@ -3277,9 +3264,9 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, insertions: [IndexPath(item: (i + objectsCount) - 1, section: 0)], frozen: true)
+                    checkChangeset(change, insertions: [IndexPath(item: (i + objectsCount) - 1, section: 0)], frozen: true)
                 }
                 sema.signal()
         }
@@ -3303,7 +3290,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for (i, collection) in arr.enumerated() {
                     XCTAssertTrue(collection.isFrozen)
                     if collection.count != 0 {
@@ -3327,7 +3314,7 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for (i, collection) in arr.enumerated() {
                     XCTAssertTrue(collection.isFrozen)
                     if collection.count != 0 {
@@ -3355,9 +3342,9 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, insertions: [IndexPath(item: i - 1, section: 0)], frozen: true)
+                    checkChangeset(change, insertions: [IndexPath(item: i - 1, section: 0)], frozen: true)
                 }
                 exp.fulfill()
         }
@@ -3376,9 +3363,9 @@ private class CombineSectionedResultsPublisherTests<Collection: RealmCollection>
             .prefix(10)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for (i, change) in arr.enumerated() {
-                    self.checkChangeset(change, insertions: [IndexPath(item: (i + objectsCount) - 1, section: 0)], frozen: true)
+                    checkChangeset(change, insertions: [IndexPath(item: (i + objectsCount) - 1, section: 0)], frozen: true)
                 }
                 sectionExp.fulfill()
         }
@@ -3536,7 +3523,7 @@ class CombineProjectionPublisherTests: CombinePublisherTestCase {
             }
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 XCTAssertEqual(arr.count, 10)
                 sema.signal()
             }
@@ -3779,7 +3766,7 @@ class CombineProjectionPublisherTests: CombinePublisherTestCase {
             .freeze()
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 XCTAssertEqual(arr.count, 10)
                 for i in 0..<10 {
                     XCTAssertEqual(arr[i].int, i + 1)
@@ -3807,7 +3794,7 @@ class CombineProjectionPublisherTests: CombinePublisherTestCase {
             }
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 XCTAssertEqual(arr.count, 10)
                 for i in 0..<10 {
                     XCTAssertEqual(arr[i].int, i + 1)
@@ -3832,7 +3819,7 @@ class CombineProjectionPublisherTests: CombinePublisherTestCase {
             .freeze()
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 var prev: SimpleProjection?
                 for change in arr {
                     guard case .change(let p, let properties) = change else {
@@ -3867,7 +3854,7 @@ class CombineProjectionPublisherTests: CombinePublisherTestCase {
             .receive(on: receiveOnQueue)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 for change in arr {
                     guard case .change(let p, let properties) = change else {
                         XCTFail("Expected .change but got \(change)")
@@ -3901,7 +3888,7 @@ class CombineProjectionPublisherTests: CombinePublisherTestCase {
             .receive(on: receiveOnQueue)
             .collect()
             .assertNoFailure()
-            .sink { arr in
+            .sink { @Sendable arr in
                 var prev: SimpleProjection?
                 for change in arr {
                     guard case .change(let p, let properties) = change else {
@@ -4081,6 +4068,7 @@ class CombineProjectionPublisherTests: CombinePublisherTestCase {
 
 @available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *)
 class CombineAsyncRealmTests: CombinePublisherTestCase {
+    @MainActor
     func testWillChangeLocalWrite() {
         let asyncWriteExpectation = expectation(description: "Should complete async write")
         cancellable = realm.objectWillChange.sink {

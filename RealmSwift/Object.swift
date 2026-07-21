@@ -133,8 +133,8 @@ extension Object: _RealmCollectionValueInsideOptional {
      It is not considered part of the public API.
      :nodoc:
      */
-    public override final class func _getProperties() -> [RLMProperty] {
-        return ObjectUtil.getSwiftProperties(self)
+    public override static func _getProperties() -> [RLMProperty] {
+        ObjectUtil.getSwiftProperties(self)
     }
 
     // MARK: Object Customization
@@ -406,7 +406,6 @@ extension Object: _RealmCollectionValueInsideOptional {
         _observe(keyPaths: keyPaths.map(_name(for:)), on: queue, block)
     }
 
-#if swift(>=5.8)
     /**
     Registers a block to be called each time the object changes.
 
@@ -441,14 +440,14 @@ extension Object: _RealmCollectionValueInsideOptional {
     - returns: A token which must be held for as long as you want updates to be delivered.
      */
     @available(macOS 10.15, tvOS 13.0, iOS 13.0, watchOS 6.0, *)
-    @_unsafeInheritExecutor
     public func observe<A: Actor, T: Object>(
         keyPaths: [String]? = nil, on actor: A,
+        _isolation: isolated (any Actor)? = #isolation,
         _ block: @Sendable @escaping (isolated A, ObjectChange<T>) -> Void
     ) async -> NotificationToken {
         await with(self, on: actor) { actor, obj in
             await obj._observe(keyPaths: keyPaths, on: actor, block)
-        } ?? NotificationToken()
+        }
     }
 
     /**
@@ -485,14 +484,13 @@ extension Object: _RealmCollectionValueInsideOptional {
     - returns: A token which must be held for as long as you want updates to be delivered.
      */
     @available(macOS 10.15, tvOS 13.0, iOS 13.0, watchOS 6.0, *)
-    @_unsafeInheritExecutor
     public func observe<A: Actor, T: Object>(
         keyPaths: [PartialKeyPath<T>], on actor: A,
+        _isolation: isolated (any Actor)? = #isolation,
         _ block: @Sendable @escaping (isolated A, ObjectChange<T>) -> Void
     ) async -> NotificationToken {
         await observe(keyPaths: keyPaths.map(_name(for:)), on: actor, block)
     }
-#endif // swift(>=5.8)
 
     // MARK: Dynamic list
 
@@ -715,7 +713,7 @@ public final class DynamicObject: Object {
 
     /// :nodoc:
     public override func value(forUndefinedKey key: String) -> Any? {
-        return self[key]
+        self[key]
     }
 
     /// :nodoc:
@@ -724,11 +722,11 @@ public final class DynamicObject: Object {
     }
 
     /// :nodoc:
-    public override class func shouldIncludeInDefaultSchema() -> Bool {
-        return false
+    public override static func shouldIncludeInDefaultSchema() -> Bool {
+        false
     }
 
-    override public class func sharedSchema() -> RLMObjectSchema? {
+    override public static func sharedSchema() -> RLMObjectSchema? {
         nil
     }
 

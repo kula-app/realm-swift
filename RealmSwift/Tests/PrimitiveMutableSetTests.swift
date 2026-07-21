@@ -19,6 +19,10 @@
 import XCTest
 import RealmSwift
 
+#if canImport(RealmSwiftTestSupport)
+import RealmSwiftTestSupport
+#endif
+
 class PrimitiveMutableSetTestsBase<O: ObjectFactory, V: SetValueFactory>: TestCase {
     var realm: Realm?
     var obj: V.SetRoot!

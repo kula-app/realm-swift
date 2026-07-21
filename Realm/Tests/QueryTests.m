@@ -167,11 +167,8 @@
     XCTAssertThrows([[realm objects:@"" where:@"age > 25"] sortedResultsUsingKeyPath:@"age" ascending:YES], @"missing class name");
 
     // nil class name
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wnonnull"
-    XCTAssertThrows([realm objects:nil where:@"age > 25"], @"nil class name");
-    XCTAssertThrows([[realm objects:nil where:@"age > 25"] sortedResultsUsingKeyPath:@"age" ascending:YES], @"nil class name");
-#pragma clang diagnostic pop
+    XCTAssertThrows([realm objects:self.nonLiteralNil where:@"age > 25"], @"nil class name");
+    XCTAssertThrows([[realm objects:self.nonLiteralNil where:@"age > 25"] sortedResultsUsingKeyPath:@"age" ascending:YES], @"nil class name");
 }
 
 - (void)testPredicateValidUse
@@ -240,6 +237,8 @@
     // Nonexistent aggregate operators
     RLMAssertThrowsWithReason([PersonObject objectsWhere:@"children.@average.age == 5"],
                               @"Unsupported collection operation '@average'");
+    RLMAssertThrowsWithReason([PersonObject objectsWhere:@"name <[c] 'name'"],
+                              @"Lexicographical comparisons must be case-sensitive");
 
     // block-based predicate
     NSPredicate *pred = [NSPredicate predicateWithBlock:^BOOL (__unused id obj, __unused NSDictionary *bindings) {
@@ -312,7 +311,7 @@
     // malformed keypath operators
     RLMAssertThrowsWithReason([PersonObject objectsWhere:@"@count == 0"],
                               @"Invalid keypath '@count': collection operation '@count' must be applied to a collection");
-    NSPredicate *pred = [NSComparisonPredicate predicateWithLeftExpression:[NSExpression expressionForKeyPath:@"name.@"] rightExpression:[NSExpression expressionForConstantValue:@0] modifier:0 type:NSEqualToPredicateOperatorType options:0];
+    [NSComparisonPredicate predicateWithLeftExpression:[NSExpression expressionForKeyPath:@"name.@"] rightExpression:[NSExpression expressionForConstantValue:@0] modifier:0 type:NSEqualToPredicateOperatorType options:0];
     RLMAssertThrowsWithReason([PersonObject objectsWithPredicate:predicateWithKeyPath(@"children.@")],
                               @"Unsupported collection operation '@'");
     RLMAssertThrowsWithReason([PersonObject objectsWithPredicate:predicateWithKeyPath(@"children@")],
@@ -344,6 +343,7 @@
     RLMAssertThrowsWithReason([PersonObject objectsWhere:@"age BETWEEN {0, age}"], @"must be constant values");
     RLMAssertThrowsWithReason([PersonObject objectsWhere:@"age BETWEEN {0, {1, 10}}"], @"must be constant values");
 
+    NSPredicate *pred;
     pred = [NSPredicate predicateWithFormat:@"age BETWEEN %@", @[@1]];
     RLMAssertThrowsWithReason([PersonObject objectsWithPredicate:pred], @"exactly two objects");
 
@@ -375,11 +375,9 @@
 {
     XCTAssertThrows([StringObject objectsWhere:@"stringCol MATCHES 'abc'"]);
     XCTAssertThrows([StringObject objectsWhere:@"stringCol BETWEEN {'a', 'b'}"]);
-    XCTAssertThrows([StringObject objectsWhere:@"stringCol < 'abc'"]);
 
     XCTAssertThrows([AllTypesObject objectsWhere:@"objectCol.stringCol MATCHES 'abc'"]);
     XCTAssertThrows([AllTypesObject objectsWhere:@"objectCol.stringCol BETWEEN {'a', 'b'}"]);
-    XCTAssertThrows([AllTypesObject objectsWhere:@"objectCol.stringCol < 'abc'"]);
 }
 
 - (void)testBinaryComparisonInPredicate {
@@ -394,11 +392,10 @@
 
     RLMAssertCount(BinaryObject, 0U, @"binaryCol = %@", data);
     RLMAssertCount(BinaryObject, 0U, @"binaryCol != %@", data);
-
-    XCTAssertThrows(([BinaryObject objectsWhere:@"binaryCol < %@", data]));
-    XCTAssertThrows(([BinaryObject objectsWhere:@"binaryCol <= %@", data]));
-    XCTAssertThrows(([BinaryObject objectsWhere:@"binaryCol > %@", data]));
-    XCTAssertThrows(([BinaryObject objectsWhere:@"binaryCol >= %@", data]));
+    RLMAssertCount(BinaryObject, 0U, @"binaryCol > %@", data);
+    RLMAssertCount(BinaryObject, 0U, @"binaryCol >= %@", data);
+    RLMAssertCount(BinaryObject, 0U, @"binaryCol < %@", data);
+    RLMAssertCount(BinaryObject, 0U, @"binaryCol <= %@", data);
 
     XCTAssertThrows(([BinaryObject objectsWhere:@"binaryCol MATCHES %@", data]));
 }
@@ -1802,8 +1799,6 @@
 
 - (void)testLinkQueryString
 {
-    RLMRealm *realm = [self realm];
-
     [self makeDogWithName:@"Harvie" owner:@"Tim"];
     RLMAssertCount(OwnerObject, 1U, @"dog.dogName  = 'Harvie'");
     RLMAssertCount(OwnerObject, 0U, @"dog.dogName != 'Harvie'");
@@ -1839,8 +1834,10 @@
     RLMAssertCount(OwnerObject, 4U, @"dog.dogName == dog.dogName");
     RLMAssertCount(OwnerObject, 0U, @"dog.dogName != dog.dogName");
 
-    // test invalid operators
-    XCTAssertThrows([OwnerObject objectsInRealm:realm where:@"dog.dogName > 'Harvie'"], @"Invalid operator should throw");
+    RLMAssertCount(OwnerObject, 1U, @"dog.dogName > 'Harvie'");
+    RLMAssertCount(OwnerObject, 3U, @"dog.dogName >= 'Harvie'");
+    RLMAssertCount(OwnerObject, 1U, @"dog.dogName < 'Harvie'");
+    RLMAssertCount(OwnerObject, 3U, @"dog.dogName <= 'Harvie'");
 }
 
 - (void)testLinkQueryInt
@@ -3120,7 +3117,7 @@ static NSData *data(const char *str) {
     [arr.array addObject:[IntObject createInRealm:realm withValue:@[ @2 ]]];
     [arr.array addObject:[IntObject createInRealm:realm withValue:@[ @3 ]]];
 
-    arr = [IntegerArrayPropertyObject createInRealm:realm withValue:@[ @0, @[]]];
+    [IntegerArrayPropertyObject createInRealm:realm withValue:@[ @0, @[]]];
 
     [realm commitWriteTransaction];
 
@@ -3159,7 +3156,7 @@ static NSData *data(const char *str) {
     [set.set addObject:[IntObject createInRealm:realm withValue:@[ @2 ]]];
     [set.set addObject:[IntObject createInRealm:realm withValue:@[ @3 ]]];
 
-    set = [IntegerSetPropertyObject createInRealm:realm withValue:@[ @0, @[]]];
+    [IntegerSetPropertyObject createInRealm:realm withValue:@[ @0, @[]]];
 
     [realm commitWriteTransaction];
 
@@ -3198,7 +3195,7 @@ static NSData *data(const char *str) {
     idpo.dictionary[@"2"] = [IntObject createInRealm:realm withValue:@[ @2 ]];
     idpo.dictionary[@"3"] = [IntObject createInRealm:realm withValue:@[ @3 ]];
 
-    idpo = [IntegerDictionaryPropertyObject createInRealm:realm withValue:@[ @0, @[]]];
+    [IntegerDictionaryPropertyObject createInRealm:realm withValue:@[ @0, @[]]];
 
     [realm commitWriteTransaction];
 
@@ -3237,7 +3234,7 @@ static NSData *data(const char *str) {
     arr = [IntegerArrayPropertyObject createInRealm:realm withValue:@[ @2222, @[] ]];
     [arr.array addObject:[IntObject createInRealm:realm withValue:@[ @100 ]]];
 
-    arr = [IntegerArrayPropertyObject createInRealm:realm withValue:@[ @3333, @[] ]];
+    [IntegerArrayPropertyObject createInRealm:realm withValue:@[ @3333, @[] ]];
 
     [realm commitWriteTransaction];
 
@@ -3306,7 +3303,7 @@ static NSData *data(const char *str) {
     set = [IntegerSetPropertyObject createInRealm:realm withValue:@[ @2222, @[] ]];
     [set.set addObject:[IntObject createInRealm:realm withValue:@[ @100 ]]];
 
-    set = [IntegerSetPropertyObject createInRealm:realm withValue:@[ @3333, @[] ]];
+    [IntegerSetPropertyObject createInRealm:realm withValue:@[ @3333, @[] ]];
 
     [realm commitWriteTransaction];
 
@@ -3375,7 +3372,7 @@ static NSData *data(const char *str) {
     idpo = [IntegerDictionaryPropertyObject createInRealm:realm withValue:@[ @2222, @[] ]];
     idpo.dictionary[@"3"] = [IntObject createInRealm:realm withValue:@[ @100 ]];
 
-    idpo = [IntegerDictionaryPropertyObject createInRealm:realm withValue:@[ @3333, @[] ]];
+    [IntegerDictionaryPropertyObject createInRealm:realm withValue:@[ @3333, @[] ]];
 
     [realm commitWriteTransaction];
 
@@ -3651,6 +3648,10 @@ static NSData *data(const char *str) {
     RLMAssertCount(AllDictionariesObject, 2U, @"ANY %K.@allValues !=[c] %@", property, values[0]);
     RLMAssertCount(AllDictionariesObject, 1U, @"ANY %K.@allValues =[cd] %@", property, values[0]);
     RLMAssertCount(AllDictionariesObject, 2U, @"ANY %K.@allValues !=[cd] %@", property, values[0]);
+    RLMAssertCount(AllDictionariesObject, 1U, @"ANY %K.@allValues > %@", property, values[0]);
+    RLMAssertCount(AllDictionariesObject, 2U, @"ANY %K.@allValues >= %@", property, values[0]);
+    RLMAssertCount(AllDictionariesObject, 1U, @"ANY %K.@allValues < %@", property, values[0]);
+    RLMAssertCount(AllDictionariesObject, 2U, @"ANY %K.@allValues <= %@", property, values[0]);
 
     RLMAssertCount(AllDictionariesObject, 1U, @"ANY %K.@allValues LIKE %@", property,
                    [NSData dataWithBytes:"hello" length:5]);
@@ -3663,9 +3664,6 @@ static NSData *data(const char *str) {
     RLMAssertCount(AllDictionariesObject, 1U, @"ANY %K.@allValues ENDSWITH %@", property,
                    [NSData dataWithBytes:"lo" length:2]);
 
-    // Unsupported
-    RLMAssertThrowsWithReasonMatching(([AllDictionariesObject objectsInRealm:realm where:@"ANY %K.@allValues > %@", property, values[0]]), @"not supported");
-    RLMAssertThrowsWithReasonMatching(([AllDictionariesObject objectsInRealm:realm where:@"ANY %K.@allValues < %@", property, values[0]]), @"not supported");
 }
 
 - (void)testDictionaryQueryAllValues {
@@ -3805,11 +3803,23 @@ static NSData *data(const char *str) {
 - (void)testDictionarySubscriptThrowsException {
     RLMRealm *realm = [self realm];
     RLMAssertThrowsWithReason(([realm objects:@"ArrayPropertyObject" where:@"array['invalid'] = NULL"]),
-                              @"Invalid keypath 'array[\"invalid\"]': only dictionaries support subscript predicates.");
+                              @"Invalid keypath 'array[\"invalid\"]': only dictionaries and realm `Any` support subscript predicates.");
     RLMAssertThrowsWithReason(([realm objects:@"SetPropertyObject" where:@"set['invalid'] = NULL"]),
-                              @"Invalid keypath 'set[\"invalid\"]': only dictionaries support subscript predicates.");
+                              @"Invalid keypath 'set[\"invalid\"]': only dictionaries and realm `Any` support subscript predicates.");
     RLMAssertThrowsWithReason(([realm objects:@"OwnerObject" where:@"dog['dogName'] = NULL"]),
                               @"Aggregate operations can only be used on key paths that include an collection property");
+    RLMAssertThrows(([realm objects:@"DictionaryPropertyObject" where:@"stringDictionary[%@] = NULL", [RLMObjectId objectId]]),
+                    @"Invalid subscript type 'anyCol[[a-z0-9]+]': Only `Strings` or index are allowed subscripts");
+    RLMAssertThrowsWithReason(([realm objects:@"DictionaryPropertyObject" where:@"stringDictionary['aKey']['bKey'] = NULL"]),
+                              @"Invalid subscript size 'stringDictionary[\"aKey\"][\"bKey\"]': nested dictionaries queries are only allowed in mixed properties.");
+    RLMAssertThrowsWithReason(([realm objects:@"DictionaryPropertyObject" where:@"stringDictionary[0] = NULL"]),
+                              @"Invalid subscript type 'stringDictionary[0]'; only string keys are allowed as subscripts in dictionary queries.");
+}
+
+- (void)testMixedSubscriptsThrowsException {
+    RLMRealm *realm = [self realm];
+    RLMAssertThrows(([realm objects:@"AllTypesObject" where:@"anyCol[%@] = NULL", [RLMObjectId objectId]]),
+                    @"Invalid subscript type 'anyCol[[a-z0-9]+]': Only `Strings` or index are allowed subscripts");
 }
 
 - (void)testCollectionsQueryAllValuesAllKeys {

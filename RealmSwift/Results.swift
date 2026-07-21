@@ -149,7 +149,6 @@ extension Projection: KeypathSortable {}
 
     // MARK: Flexible Sync
 
-#if swift(>=5.8)
     /**
      Creates a SyncSubscription matching the Results' local query.
      After committing the subscription to the realm's local subscription set, the method
@@ -181,21 +180,32 @@ extension Projection: KeypathSortable {}
 
      - warning: This function is only supported for main thread and
                 actor-isolated Realms.
-     - warning: This API is currently in `Preview` and may be subject to changes in the future.
      */
     @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
-    @_unsafeInheritExecutor
-    public func subscribe(name: String? = nil, waitForSync: WaitForSyncMode = .onCreation, timeout: TimeInterval? = nil) async throws -> Results<Element> {
+    public func subscribe(
+        name: String? = nil,
+        waitForSync: WaitForSyncMode = .onCreation,
+        timeout: TimeInterval? = nil,
+        _isolation: isolated any Actor = #isolation
+    ) async throws -> Results<Element> {
         guard let actor = realm?.rlmRealm.actor as? Actor else {
             fatalError("`subscribe` can only be called on main thread or actor-isolated Realms")
         }
 
-        var rlmResults = ObjectiveCSupport.convert(object: self)
+        let rlmResults = ObjectiveCSupport.convert(object: self)
         let scheduler = await RLMScheduler.actor(actor, invoke: actor.invoke, verify: actor.verifier())
-        rlmResults = try await rlmResults.subscribe(withName: name, waitForSync: waitForSync, confinedTo: scheduler, timeout: timeout ?? 0)
+        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            rlmResults.subscribe(withName: name, waitForSync: waitForSync, confinedTo: scheduler, timeout: timeout ?? 0) { _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
         return self
     }
-#endif
+
     /**
      Removes a SyncSubscription matching the Results' local filter.
 

@@ -1475,7 +1475,7 @@
         [asyncComplete fulfill];
         XCTAssertNil(error);
     }];
-    
+
     [self waitForExpectationsWithTimeout:1.0 handler:nil];
 }
 
@@ -1774,7 +1774,7 @@
 
         [realm beginAsyncWriteTransaction:^{
             [StringObject createInRealm:realm withValue:@[@"string"]];
-            
+
             [realm commitAsyncWriteTransaction:^(NSError *error) {
                 XCTAssertEqual(0U, [StringObject allObjects].count);
                 [transaction1 fulfill];
@@ -1801,7 +1801,7 @@
 
         [realm beginWriteTransaction];
         [StringObject createInRealm:realm withValue:@[@"string"]];
-        
+
         [realm beginAsyncWriteTransaction:^{
             [StringObject createInRealm:realm withValue:@[@"string"]];
 
@@ -1823,7 +1823,7 @@
 
     [self dispatchAsync:^{
         RLMRealm *realm = [RLMRealm defaultRealmForQueue:self.bgQueue];
-        
+
         [realm beginAsyncWriteTransaction:^{
             [StringObject createInRealm:realm withValue:@[@"string 1"]];
 
@@ -1941,7 +1941,7 @@
             }];
         }];
     });
-    
+
     [self waitForExpectationsWithTimeout:2.0 handler:nil];
     XCTAssertEqual(1U, [StringObject allObjectsInRealm:[RLMRealm defaultRealm]].count);
 }
@@ -1977,7 +1977,7 @@
     }];
 
     [realm cancelAsyncTransaction:transId+1];
-    
+
     [self waitForExpectationsWithTimeout:2.0 handler:nil];
     XCTAssertEqual(1U, [StringObject allObjectsInRealm:[RLMRealm defaultRealm]].count);
 }
@@ -2008,7 +2008,7 @@
 
     XCTAssertFalse(realm.isPerformingAsynchronousWriteOperations);
     XCTAssertFalse(realm.inWriteTransaction);
-    
+
     [realm beginWriteTransaction];
     XCTAssertFalse(realm.isPerformingAsynchronousWriteOperations);
     XCTAssertTrue(realm.inWriteTransaction);
@@ -2589,7 +2589,7 @@
 - (void)testThawDifferentThread {
     RLMRealm *frozenRealm = [[RLMRealm defaultRealm] freeze];
     XCTAssertTrue(frozenRealm.frozen);
-    
+
     // Thaw on a thread which already has a Realm should use existing reference.
     [self dispatchAsyncAndWait:^{
         RLMRealm *realm = [RLMRealm defaultRealm];
@@ -2597,8 +2597,8 @@
         XCTAssertFalse(thawed.frozen);
         XCTAssertEqual(thawed, realm);
     }];
-    
-    // Thaw on thread without existing refernce.
+
+    // Thaw on thread without existing reference.
     [self dispatchAsyncAndWait:^{
         RLMRealm *thawed = [frozenRealm thaw];
         XCTAssertFalse(thawed.frozen);
@@ -2849,20 +2849,20 @@
     RLMSetSkipBackupAttribute(true);
     [self measureBlock:^{
         @autoreleasepool {
-            RLMRealm *realm = [RLMRealm defaultRealm];
-            realm = [RLMRealm defaultRealm];
-            realm = [RLMRealm defaultRealm];
-            realm = [RLMRealm defaultRealm];
-            realm = [RLMRealm defaultRealm];
-            realm = [RLMRealm defaultRealm];
-            realm = [RLMRealm defaultRealm];
-            realm = [RLMRealm defaultRealm];
-            realm = [RLMRealm defaultRealm];
-            realm = [RLMRealm defaultRealm];
-            realm = [RLMRealm defaultRealm];
-            realm = [RLMRealm defaultRealm];
-            realm = [RLMRealm defaultRealm];
-            realm = [RLMRealm defaultRealm];
+            [RLMRealm defaultRealm];
+            [RLMRealm defaultRealm];
+            [RLMRealm defaultRealm];
+            [RLMRealm defaultRealm];
+            [RLMRealm defaultRealm];
+            [RLMRealm defaultRealm];
+            [RLMRealm defaultRealm];
+            [RLMRealm defaultRealm];
+            [RLMRealm defaultRealm];
+            [RLMRealm defaultRealm];
+            [RLMRealm defaultRealm];
+            [RLMRealm defaultRealm];
+            [RLMRealm defaultRealm];
+            [RLMRealm defaultRealm];
         }
         @autoreleasepool { [RLMRealm defaultRealm]; }
     }];

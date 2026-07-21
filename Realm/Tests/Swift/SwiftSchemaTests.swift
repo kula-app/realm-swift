@@ -150,10 +150,8 @@ class OnlyComputedNoBacklinksProps: FakeObject {
     }
 }
 
-@MainActor
 class RequiresObjcName: RLMObject {
-    static var enable = false
-    @MainActor
+    nonisolated(unsafe) static var enable = false
     override class func _realmIgnoreClass() -> Bool {
         return !enable
     }

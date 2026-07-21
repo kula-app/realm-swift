@@ -520,7 +520,6 @@ public final class Map<Key: _MapKey, Value: RealmCollectionValue>: RLMSwiftColle
         return rlmDictionary.addNotificationBlock(wrapped, keyPaths: keyPaths, queue: queue)
     }
 
-#if swift(>=5.8)
     /**
     Registers a block to be called each time the map changes.
 
@@ -601,18 +600,17 @@ public final class Map<Key: _MapKey, Value: RealmCollectionValue>: RLMSwiftColle
     - returns: A token which must be held for as long as you want updates to be delivered.
      */
     @available(macOS 10.15, tvOS 13.0, iOS 13.0, watchOS 6.0, *)
-    @_unsafeInheritExecutor
     public func observe<A: Actor>(
         keyPaths: [String]? = nil, on actor: A,
+        _isolation: isolated (any Actor)? = #isolation,
         _ block: @Sendable @escaping (isolated A, RealmMapChange<Map>) -> Void
     ) async -> NotificationToken {
-        await with(self, on: actor) { actor, collection in
+        nonisolated(unsafe) let collection = self
+        return await with(collection, on: actor) { actor, collection in
             collection.observe(keyPaths: keyPaths, on: nil) { change in
-                assumeOnActorExecutor(actor) { actor in
-                    block(actor, change)
-                }
+                actor.invokeIsolated(block, change)
             }
-        } ?? NotificationToken()
+        }
     }
 
     /**
@@ -692,14 +690,13 @@ public final class Map<Key: _MapKey, Value: RealmCollectionValue>: RLMSwiftColle
     - returns: A token which must be held for as long as you want updates to be delivered.
      */
     @available(macOS 10.15, tvOS 13.0, iOS 13.0, watchOS 6.0, *)
-    @_unsafeInheritExecutor
     public func observe<A: Actor>(
         keyPaths: [PartialKeyPath<Value.Wrapped>], on actor: A,
+        _isolation: isolated (any Actor)? = #isolation,
         _ block: @Sendable @escaping (isolated A, RealmMapChange<Map>) -> Void
     ) async -> NotificationToken where Value: OptionalProtocol, Value.Wrapped: ObjectBase {
         await observe(keyPaths: keyPaths.map(_name(for:)), on: actor, block)
     }
-#endif
 
     // MARK: Frozen Objects
 
@@ -731,7 +728,7 @@ public final class Map<Key: _MapKey, Value: RealmCollectionValue>: RLMSwiftColle
                 for more information.
      */
     public func freeze() -> Map {
-        return Map(objc: rlmDictionary.freeze())
+        Map(objc: rlmDictionary.freeze())
     }
 
     /**
@@ -741,10 +738,10 @@ public final class Map<Key: _MapKey, Value: RealmCollectionValue>: RLMSwiftColle
      If called on a live `Map`, will return itself.
     */
     public func thaw() -> Map? {
-        return Map(objc: rlmDictionary.thaw())
+        Map(objc: rlmDictionary.thaw())
     }
 
-    @objc class func _unmanagedCollection() -> RLMDictionary<AnyObject, AnyObject> {
+    @objc static func _unmanagedCollection() -> RLMDictionary<AnyObject, AnyObject> {
         if let type = Value.self as? HasClassName.Type ?? Value.PersistedType.self as? HasClassName.Type {
             return RLMDictionary(objectClassName: type.className(), keyType: Key._rlmType)
         }
@@ -755,8 +752,8 @@ public final class Map<Key: _MapKey, Value: RealmCollectionValue>: RLMSwiftColle
     }
 
     /// :nodoc:
-    @objc public override class func _backingCollectionType() -> AnyClass {
-        return RLMManagedDictionary.self
+    @objc public override static func _backingCollectionType() -> AnyClass {
+        RLMManagedDictionary.self
     }
 
     /**

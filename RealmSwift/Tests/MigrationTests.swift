@@ -173,6 +173,7 @@ class MigrationTests: TestCase {
             }
         }
 
+        nonisolated(unsafe) let unsafeSelf = self
         try testMigration(schemaVersion: 2) { migration, _ in
             var count = 0
             migration.enumerateObjects(ofType: "SwiftStringObject", { oldObj, newObj in
@@ -184,8 +185,8 @@ class MigrationTests: TestCase {
                 XCTAssertEqual(oldObj.objectSchema.className, "SwiftStringObject")
                 XCTAssertEqual((newObj["stringCol"] as! String), "string")
                 XCTAssertEqual((oldObj["stringCol"] as! String), "string")
-                self.assertThrows(oldObj["noSuchCol"] as! String)
-                self.assertThrows(newObj["noSuchCol"] as! String)
+                unsafeSelf.assertThrows(oldObj["noSuchCol"] as! String)
+                unsafeSelf.assertThrows(newObj["noSuchCol"] as! String)
                 count += 1
             })
             XCTAssertEqual(count, 1)
@@ -712,6 +713,7 @@ class MigrationTests: TestCase {
 
     func testCreate() throws {
         try createDefaultRealm()
+        nonisolated(unsafe) let unsafeSelf = self
         try testMigration { migration, _ in
             migration.create("SwiftStringObject", value: ["string1"])
             migration.create("SwiftStringObject", value: ["stringCol": "string2"])
@@ -719,7 +721,7 @@ class MigrationTests: TestCase {
             migration.create("SwiftStringObject", value: ["stringCol": StringWrapper(persistedValue: "string3")])
             migration.create("SwiftStringObject")
 
-            self.assertThrows(migration.create("NoSuchObject"))
+            unsafeSelf.assertThrows(migration.create("NoSuchObject"))
         } validation: { realm, _ in
             let objects = realm.objects(SwiftStringObject.self)
             XCTAssertEqual(objects.count, 5)
@@ -823,6 +825,7 @@ class MigrationTests: TestCase {
             }
         }
 
+        nonisolated(unsafe) let unsafeSelf = self
         try testMigration { migration, _ in
             var enumerated = false
             migration.enumerateObjects(ofType: "SwiftObject", { oldObj, newObj in
@@ -851,7 +854,7 @@ class MigrationTests: TestCase {
                 XCTAssertEqual((oldObj["decimalCol"] as! Decimal128), 123e4 as Decimal128)
                 XCTAssertEqual((newObj["decimalCol"] as! Decimal128), 123e4 as Decimal128)
 
-                let binaryCol = "a".data(using: String.Encoding.utf8)!
+                let binaryCol = Data("a".utf8)
                 XCTAssertEqual((oldObj["binaryCol"] as! Data), binaryCol)
                 XCTAssertEqual((newObj["binaryCol"] as! Data), binaryCol)
 
@@ -958,8 +961,8 @@ class MigrationTests: TestCase {
                 XCTAssertEqual(map.count, 2)
                 XCTAssertEqual((map["key"]?!["boolCol"] as! Bool), true)
 
-                self.assertThrows(newObj.value(forKey: "noSuchKey"))
-                self.assertThrows(newObj.setValue(1, forKey: "noSuchKey"))
+                unsafeSelf.assertThrows(newObj.value(forKey: "noSuchKey"))
+                unsafeSelf.assertThrows(newObj.setValue(1, forKey: "noSuchKey"))
 
                 // set it again
                 newObj["arrayCol"] = [falseObj, trueObj]
@@ -1022,7 +1025,7 @@ class MigrationTests: TestCase {
                     \\);
                 \\}
                 """
-                self.assertMatches(newObj.description, expected.replacingOccurrences(of: "    ", with: "\t"))
+                unsafeSelf.assertMatches(newObj.description, expected.replacingOccurrences(of: "    ", with: "\t"))
 
                 enumerated = true
             })
@@ -1062,7 +1065,7 @@ class MigrationTests: TestCase {
                 \\);
             \\}
             """
-            self.assertMatches(newObj.description, expected.replacingOccurrences(of: "    ", with: "\t"))
+            unsafeSelf.assertMatches(newObj.description, expected.replacingOccurrences(of: "    ", with: "\t"))
         } validation: { realm, _ in
             let object = realm.objects(SwiftObject.self).first!
             XCTAssertEqual(object.boolCol, false)

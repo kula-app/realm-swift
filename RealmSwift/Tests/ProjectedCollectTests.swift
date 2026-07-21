@@ -141,6 +141,7 @@ class ProjectedCollectionsTestsTemplate: TestCase {
         }
     }
 
+    @MainActor
     func testObserve() {
         let ex = expectation(description: "initial notification")
         let token = collection.observe { (changes: RealmCollectionChange) in
@@ -177,6 +178,7 @@ class ProjectedCollectionsTestsTemplate: TestCase {
         token2.invalidate()
     }
 
+    @MainActor
     func testObserveKeyPathNoChange() {
         let ex = expectation(description: "initial notification")
         let token0 = collection.observe(keyPaths: ["firstName"]) { (changes: RealmCollectionChange) in
@@ -191,8 +193,9 @@ class ProjectedCollectionsTestsTemplate: TestCase {
             ex.fulfill()
         }
 
-        dispatchSyncNewThread {
-            let realm = self.realmWithTestPath()
+        let config = configurationWithTestPath()
+        dispatchSyncNewThread { @Sendable in
+            let realm = try! Realm(configuration: config)
             realm.beginWrite()
             let obj = realm.create(CommonPerson.self)
             obj.firstName = "Name"
@@ -258,7 +261,7 @@ class ProjectedCollectionsTestsTemplate: TestCase {
     }
 
     func testThawFromDifferentThread() {
-        let frozen = collection.freeze()
+        nonisolated(unsafe) let frozen = collection.freeze()
         XCTAssertTrue(frozen.isFrozen)
 
         dispatchSyncNewThread {
@@ -273,14 +276,15 @@ class ProjectedCollectionsTestsTemplate: TestCase {
     }
 
     func testFreezeFromWrongThread() {
-        let collection = realmWithTestPath().objects(PersonProjection.self).first!.firstFriendsName
+        nonisolated(unsafe) let collection = realmWithTestPath().objects(PersonProjection.self).first!.firstFriendsName
+        nonisolated(unsafe) let unsafeSelf = self
         dispatchSyncNewThread {
-            self.assertThrows(collection.freeze(), reason: "Realm accessed from incorrect thread")
+            unsafeSelf.assertThrows(collection.freeze(), reason: "Realm accessed from incorrect thread")
         }
     }
 
     func testAccessFrozenCollectionFromDifferentThread() {
-        let frozen = collection.freeze()
+        nonisolated(unsafe) let frozen = collection.freeze()
         dispatchSyncNewThread {
             XCTAssertTrue(frozen.contains(where: { $0 == "Daenerys" }))
             XCTAssertTrue(frozen.contains(where: { $0 == "Tyrion" }))

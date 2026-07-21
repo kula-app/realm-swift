@@ -673,18 +673,18 @@ class ModernObjectAccessorTests: TestCase {
 
     func testThreadChecking() {
         let realm = try! Realm()
-        var obj: ModernAllTypesObject!
+        nonisolated(unsafe) var obj: ModernAllTypesObject!
         try! realm.write {
             obj = realm.create(ModernAllTypesObject.self)
             // Create the lazily-initialized List to test the cached codepath
             obj.arrayInt.removeAll()
             obj.arrayInt8.removeAll()
         }
-        dispatchSyncNewThread {
-            self.assertThrows(_ = obj.intCol, reason: "incorrect thread")
-            self.assertThrows(obj.arrayInt.removeAll(), reason: "incorrect thread")
-            self.assertThrows(obj.int8Col = 5, reason: "incorrect thread")
-            self.assertThrows(obj.arrayInt8 = List<Int8>(), reason: "incorrect thread")
+        dispatchSyncBackground { unsafeSelf in
+            unsafeSelf.assertThrows(_ = obj.intCol, reason: "incorrect thread")
+            unsafeSelf.assertThrows(obj.arrayInt.removeAll(), reason: "incorrect thread")
+            unsafeSelf.assertThrows(obj.int8Col = 5, reason: "incorrect thread")
+            unsafeSelf.assertThrows(obj.arrayInt8 = List<Int8>(), reason: "incorrect thread")
         }
     }
 

@@ -219,18 +219,18 @@ bool copySeedFile(RLMRealmConfiguration *configuration, NSError **error) {
     if (!configuration.seedFilePath) {
         return false;
     }
+    NSError *copyError;
+    bool didCopySeed = false;
     @autoreleasepool {
-        bool didCopySeed = false;
-        NSError *copyError;
         DB::call_with_lock(configuration.path, [&](auto const&) {
             didCopySeed = [[NSFileManager defaultManager] copyItemAtURL:configuration.seedFilePath
                                                                   toURL:configuration.fileURL
                                                                   error:&copyError];
         });
-        if (!didCopySeed && copyError != nil && copyError.code != NSFileWriteFileExistsError) {
-            RLMSetErrorOrThrow(copyError, error);
-            return true;
-        }
+    }
+    if (!didCopySeed && copyError && copyError.code != NSFileWriteFileExistsError) {
+        RLMSetErrorOrThrow(copyError, error);
+        return true;
     }
     return false;
 }
@@ -434,7 +434,6 @@ bool copySeedFile(RLMRealmConfiguration *configuration, NSError **error) {
         return nil;
     }
 
-    bool realmIsCached = false;
     // if we have a cached realm on another thread we can skip a few steps and
     // just grab its schema
     @autoreleasepool {
@@ -443,7 +442,6 @@ bool copySeedFile(RLMRealmConfiguration *configuration, NSError **error) {
             realm->_realm->set_schema_subset(cachedRealm->_realm->schema());
             realm->_schema = cachedRealm.schema;
             realm->_info = cachedRealm->_info.clone(cachedRealm->_realm->schema(), realm);
-            realmIsCached = true;
         }
     }
 
@@ -593,6 +591,14 @@ bool copySeedFile(RLMRealmConfiguration *configuration, NSError **error) {
     configuration.configRef = _realm->config();
     configuration.dynamic = _dynamic;
     configuration.customSchema = _schema;
+    return configuration;
+}
+
+- (RLMRealmConfiguration *)configurationSharingSchema {
+    RLMRealmConfiguration *configuration = [[RLMRealmConfiguration alloc] init];
+    configuration.configRef = _realm->config();
+    configuration.dynamic = _dynamic;
+    [configuration setCustomSchemaWithoutCopying:_schema];
     return configuration;
 }
 
@@ -1076,7 +1082,7 @@ bool copySeedFile(RLMRealmConfiguration *configuration, NSError **error) {
 
 - (RLMRealm *)thaw {
     [self verifyThread];
-    return self.isFrozen ? [RLMRealm realmWithConfiguration:self.configuration error:nil] : self;
+    return self.isFrozen ? [RLMRealm realmWithConfiguration:self.configurationSharingSchema error:nil] : self;
 }
 
 - (RLMRealm *)frozenCopy {

@@ -603,22 +603,23 @@ extension MongoCollection {
             .compactMap(ObjectiveCSupport.convertBson(object:))
     }
 
-    // These uses of `@_unsafeInheritExecutor` should instead be marking the
-    // options parameters as `@Copy`. Unfortunately, as of Swift 5.8 that doesn't
-    // actually work due to https://github.com/apple/swift/issues/61358
-
-    // NEXT-MAJOR: make the options parameter non-optional and default to .init()
-    // instead of nil with nil-coalescing internally.
     /// Finds the documents in this collection which match the provided filter.
     /// - Parameters:
     ///   - filter: A `Document` as bson that should match the query.
     ///   - options: `FindOptions` to use when executing the command.
     /// - Returns: Array of `Document` filtered.
-    @_unsafeInheritExecutor
-    public func find(filter: Document, options: FindOptions? = nil) async throws -> [Document] {
-        try await __findWhere(ObjectiveCSupport.convert(filter),
-                              options: options ?? .init())
-            .map(ObjectiveCSupport.convert)
+    public func find(filter: Document, options: FindOptions = .init(),
+                     _isolation: isolated (any Actor)? = #isolation) async throws -> [Document] {
+        try await withCheckedThrowingContinuation { continuation in
+            __findWhere(ObjectiveCSupport.convert(filter),
+                        options: options) { bson, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: bson!.map(ObjectiveCSupport.convert))
+                }
+            }
+        }
     }
 
     /// Returns one document from a collection or view which matches the
@@ -629,11 +630,18 @@ extension MongoCollection {
     ///   - filter: A `Document` as bson that should match the query.
     ///   - options: `FindOptions` to use when executing the command.
     /// - Returns: `Document` filtered.
-    @_unsafeInheritExecutor
-    public func findOneDocument(filter: Document, options: FindOptions? = nil) async throws -> Document? {
-        try await __findOneDocumentWhere(ObjectiveCSupport.convert(filter),
-                                         options: options ?? .init())
-            .map(ObjectiveCSupport.convert)
+    public func findOneDocument(filter: Document, options: FindOptions = .init(),
+                                _isolation: isolated (any Actor)? = #isolation) async throws -> Document? {
+        try await withCheckedThrowingContinuation { continuation in
+            __findOneDocumentWhere(ObjectiveCSupport.convert(filter),
+                                   options: options) { bson, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: bson.map(ObjectiveCSupport.convert))
+                }
+            }
+        }
     }
 
     /// Runs an aggregation framework pipeline against this collection.
@@ -699,8 +707,6 @@ extension MongoCollection {
                                              upsert: upsert ?? false)
     }
 
-    // NEXT-MAJOR: make the options parameter non-optional and default to .init()
-    // instead of nil with nil-coalescing internally.
     /// Updates a single document in a collection based on a query filter and
     /// returns the document in either its pre-update or post-update form. Unlike
     /// `updateOneDocument`, this action allows you to atomically find, update, and
@@ -712,13 +718,20 @@ extension MongoCollection {
     ///   - update: A bson `Document` representing the update to be applied to a matching document.
     ///   - options: `RemoteFindOneAndModifyOptions` to use when executing the command.
     /// - Returns: `Document` result of the attempt to update a document  or `nil` if document wasn't found.
-    @_unsafeInheritExecutor
     public func findOneAndUpdate(filter: Document, update: Document,
-                                 options: FindOneAndModifyOptions? = nil) async throws -> Document? {
-        try await __findOneAndUpdateWhere(ObjectiveCSupport.convert(filter),
-                                          updateDocument: ObjectiveCSupport.convert(update),
-                                          options: options ?? .init())
-            .map(ObjectiveCSupport.convert)
+                                 options: FindOneAndModifyOptions = .init(),
+                                 _isolation: isolated (any Actor)? = #isolation) async throws -> Document? {
+        try await withCheckedThrowingContinuation { continuation in
+            __findOneAndUpdateWhere(ObjectiveCSupport.convert(filter),
+                                    updateDocument: ObjectiveCSupport.convert(update),
+                                    options: options) { bson, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: bson.map(ObjectiveCSupport.convert))
+                }
+            }
+        }
     }
 
     /// Overwrites a single document in a collection based on a query filter and
@@ -732,15 +745,21 @@ extension MongoCollection {
     ///   - replacement: A `Document` describing the replacement.
     ///   - options: `FindOneAndModifyOptions` to use when executing the command.
     /// - Returns: `Document`result of the attempt to reaplce a document   or `nil` if document wasn't found.
-    @_unsafeInheritExecutor
     public func findOneAndReplace(filter: Document, replacement: Document,
-                                  options: FindOneAndModifyOptions? = nil) async throws -> Document? {
-        try await __findOneAndReplaceWhere(ObjectiveCSupport.convert(filter),
-                                           replacementDocument: ObjectiveCSupport.convert(replacement),
-                                           options: options ?? .init())
-            .map(ObjectiveCSupport.convert)
+                                  options: FindOneAndModifyOptions = .init(),
+                                  _isolation: isolated (any Actor)? = #isolation) async throws -> Document? {
+        try await withCheckedThrowingContinuation { continuation in
+            __findOneAndReplaceWhere(ObjectiveCSupport.convert(filter),
+                                     replacementDocument: ObjectiveCSupport.convert(replacement),
+                                     options: options) { bson, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: bson.map(ObjectiveCSupport.convert))
+                }
+            }
+        }
     }
-
     /// Removes a single document from a collection based on a query filter and
     /// returns a document with the same form as the document immediately before
     /// it was deleted. Unlike `deleteOneDocument`, this action allows you to atomically
@@ -751,12 +770,19 @@ extension MongoCollection {
     ///   - filter: A `Document` that should match the query.
     ///   - options: `FindOneAndModifyOptions` to use when executing the command.
     /// - Returns: `Document` result of the attempt to delete a document  or `nil` if document wasn't found.
-    @_unsafeInheritExecutor
     public func findOneAndDelete(filter: Document,
-                                 options: FindOneAndModifyOptions? = nil) async throws -> Document? {
-        try await __findOneAndDeleteWhere(ObjectiveCSupport.convert(filter),
-                                          options: options ?? .init())
-            .map(ObjectiveCSupport.convert)
+                                 options: FindOneAndModifyOptions = .init(),
+                                 _isolation: isolated (any Actor)? = #isolation) async throws -> Document? {
+        try await withCheckedThrowingContinuation { continuation in
+            __findOneAndDeleteWhere(ObjectiveCSupport.convert(filter),
+                                    options: options) { bson, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: bson.map(ObjectiveCSupport.convert))
+                }
+            }
+        }
     }
 }
 

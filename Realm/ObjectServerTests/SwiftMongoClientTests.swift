@@ -41,6 +41,7 @@ class SwiftMongoClientTests: SwiftSyncTestCase {
         super.tearDown()
     }
 
+    @MainActor
     func testMongoClient() {
         let user = try! logInUser(for: .anonymous)
         let mongoClient = user.mongoClient("mongodb1")
@@ -639,15 +640,18 @@ class SwiftMongoClientTests: SwiftSyncTestCase {
         watchTestUtility.waitForClose()
     }
 
+    @MainActor
     func testWatchWithMatchFilter() throws {
         try performWatchWithMatchFilterTest(.main)
     }
 
+    @MainActor
     func testWatchWithMatchFilterQueue() throws {
         let queue = DispatchQueue(label: "io.realm.watchQueue", attributes: .concurrent)
         try performWatchWithMatchFilterTest(queue)
     }
 
+    @MainActor
     func insertDocuments(_ collection: MongoCollection) -> [ObjectId] {
         let document: Document = ["name": "fido", "breed": "cane corso"]
         let document2: Document = ["name": "rex", "breed": "cane corso"]
@@ -661,6 +665,7 @@ class SwiftMongoClientTests: SwiftSyncTestCase {
         return objectIds
     }
 
+    @MainActor
     func performWatchWithMatchFilterTest(_ queue: DispatchQueue?) throws {
         let collection = setupMongoCollection()
         let objectIds = insertDocuments(collection)
@@ -696,15 +701,18 @@ class SwiftMongoClientTests: SwiftSyncTestCase {
         watchTestUtility.waitForClose()
     }
 
+    @MainActor
     func testWatchWithFilterIds() throws {
         try performWatchWithFilterIdsTest(nil)
     }
 
+    @MainActor
     func testWatchWithFilterIdsQueue() throws {
         let queue = DispatchQueue(label: "io.realm.watchQueue", attributes: .concurrent)
         try performWatchWithFilterIdsTest(queue)
     }
 
+    @MainActor
     func performWatchWithFilterIdsTest(_ queue: DispatchQueue?) throws {
         let collection = setupMongoCollection()
         let objectIds = insertDocuments(collection)
@@ -738,12 +746,8 @@ class SwiftMongoClientTests: SwiftSyncTestCase {
         watchTestUtility.waitForClose()
     }
 
-#if swift(>=5.8)
-    // wait(for:) doesn't work in async functions because it blocks the calling
-    // thread and doesn't let async tasks run. Xcode 14.3 introduced a new async
-    // version of it which does work, but there doesn't appear to be a workaround
-    // for older Xcode versions.
     @available(macOS 13, *)
+    @MainActor
     func performAsyncWatchTest(filterIds: Bool = false, matchFilter: Bool = false) async throws {
         let collection = setupMongoCollection()
         let objectIds = insertDocuments(collection)
@@ -802,17 +806,19 @@ class SwiftMongoClientTests: SwiftSyncTestCase {
     func testWatchWithFilterIdsAsync() async throws {
         try await performAsyncWatchTest(filterIds: true)
     }
-#endif
 
+    @MainActor
     func testWatchMultipleFilterStreams() throws {
         try performMultipleWatchStreamsTest(nil)
     }
 
+    @MainActor
     func testWatchMultipleFilterStreamsAsync() throws {
         let queue = DispatchQueue(label: "io.realm.watchQueue", attributes: .concurrent)
         try performMultipleWatchStreamsTest(queue)
     }
 
+    @MainActor
     func performMultipleWatchStreamsTest(_ queue: DispatchQueue?) throws {
         let collection = setupMongoCollection()
         let objectIds = insertDocuments(collection)
@@ -856,6 +862,7 @@ class SwiftMongoClientTests: SwiftSyncTestCase {
         watchTestUtility2.waitForClose()
     }
 
+    @MainActor
     func testShouldNotDeleteOnMigrationWithSync() throws {
         var configuration = try configuration()
         assertThrows(configuration.deleteRealmIfMigrationNeeded = true,
@@ -868,7 +875,6 @@ class SwiftMongoClientTests: SwiftSyncTestCase {
     }
 }
 
-#if swift(>=5.8)
 // MARK: - AsyncAwaitMongoClientTests
 @available(macOS 13, *)
 class AsyncAwaitMongoClientTests: SwiftSyncTestCase {
@@ -1247,6 +1253,5 @@ class AsyncAwaitMongoClientTests: SwiftSyncTestCase {
         XCTAssertEqual(count5, 1)
     }
 }
-#endif
 
 #endif // os(macOS)

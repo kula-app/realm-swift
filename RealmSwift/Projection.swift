@@ -458,7 +458,6 @@ extension ProjectionObservable {
         observe(keyPaths: map(keyPaths: keyPaths), on: queue, block)
     }
 
-#if swift(>=5.8)
     /**
      Registers a block to be called each time the projection's underlying object changes.
 
@@ -530,18 +529,16 @@ extension ProjectionObservable {
      - returns: A token which must be held for as long as you want updates to be delivered.
      */
     @available(macOS 10.15, tvOS 13.0, iOS 13.0, watchOS 6.0, *)
-    @_unsafeInheritExecutor
     public func observe<A: Actor>(
         keyPaths: [String]? = nil, on actor: A,
+        _isolation: isolated (any Actor)? = #isolation,
         _ block: @Sendable @escaping (isolated A, ObjectChange<Self>) -> Void
     ) async -> NotificationToken {
         await with(self, on: actor) { actor, obj in
             obj.observe(keyPaths: keyPaths, on: nil) { (change: ObjectChange<Self>) in
-                assumeOnActorExecutor(actor) { actor in
-                    block(actor, change)
-                }
+                actor.invokeIsolated(block, change)
             }
-        } ?? NotificationToken()
+        }
     }
 
     /**
@@ -615,14 +612,13 @@ extension ProjectionObservable {
      - returns: A token which must be held for as long as you want updates to be delivered.
      */
     @available(macOS 10.15, tvOS 13.0, iOS 13.0, watchOS 6.0, *)
-    @_unsafeInheritExecutor
     public func observe<A: Actor>(
         keyPaths: [PartialKeyPath<Self>], on actor: A,
+        _isolation: isolated (any Actor)? = #isolation,
         _ block: @Sendable @escaping (isolated A, ObjectChange<Self>) -> Void
     ) async -> NotificationToken {
         await observe(keyPaths: map(keyPaths: keyPaths), on: actor, block)
     }
-#endif
 
     fileprivate var schema: [ProjectionProperty] {
         projectionSchemaCache.schema(for: self)

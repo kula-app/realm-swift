@@ -21,6 +21,7 @@ import XCTest
 
 #if canImport(RealmTestSupport)
 import RealmTestSupport
+import RealmSwiftTestSupport
 #endif
 
 class PrimitiveListTestsBase<O: ObjectFactory, V: ListValueFactory>: RLMTestCaseBase {

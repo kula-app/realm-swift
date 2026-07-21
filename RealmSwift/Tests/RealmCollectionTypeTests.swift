@@ -619,6 +619,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
         XCTAssertEqual(0, collection.where { $0.stringListCol.contains(CTTNullableStringObjectWithLink()) }.count)
     }
 
+    @MainActor
     func testObserve() {
         let ex = expectation(description: "initial notification")
         let token = collection.observe { (changes: RealmCollectionChange) in
@@ -655,7 +656,6 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
         token2.invalidate()
     }
 
-#if swift(>=5.8)
     @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
     private actor TestActor {
         private var gotInitial = false
@@ -666,7 +666,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
             expectation = XCTestExpectation(description: description)
         }
 
-        func check(_ changes: RealmCollectionChange<Collection>) {
+        func check<Collection2: RealmCollection>(_ changes: RealmCollectionChange<Collection2>) {
             switch changes {
             case .initial(let collection):
                 XCTAssertEqual(collection.count, 2)
@@ -685,7 +685,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
             expectation.fulfill()
         }
 
-        func checkFiltered(_ changes: RealmCollectionChange<Collection>) {
+        func checkFiltered<Collection2: RealmCollection>(_ changes: RealmCollectionChange<Collection2>) {
             switch changes {
             case .initial(let collection):
                 XCTAssertEqual(collection.count, 2)
@@ -704,7 +704,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
         }
 
         func observe(_ tsr: ThreadSafeReference<Collection>) async throws -> NotificationToken {
-            let realm = try await Realm(configuration: Config.config, actor: self)
+            let realm = try await openRealm(configuration: Config.config, actor: self)
             return try XCTUnwrap(realm.resolve(tsr)).observe(check)
         }
     }
@@ -799,8 +799,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
         token.invalidate()
     }
 
-#endif
-
+    @MainActor
     func testObserveKeyPath() {
         var ex = expectation(description: "initial notification")
         let token0 = collection.observe(keyPaths: ["stringCol"]) { (changes: RealmCollectionChange) in
@@ -820,8 +819,9 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
 
         // Expect a change notification for the token observing `stringCol` keypath.
         ex = self.expectation(description: "change notification")
+        nonisolated(unsafe) let unsafeSelf = self
         dispatchSyncNewThread {
-            let realm = self.realm()
+            let realm = unsafeSelf.realm()
             realm.beginWrite()
             let obj = realm.objects(CTTNullableStringObjectWithLink.self).first!
             obj.stringCol = "changed"
@@ -831,14 +831,15 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
         token0.invalidate()
     }
 
-    func expectNoChange(fn: @escaping (Realm) -> Void) {
+    func expectNoChange(fn: @Sendable @escaping (Realm) -> Void) {
         let ex = self.expectation(description: "refresh")
         let token = self.realm().observe { _, _ in
             ex.fulfill()
         }
 
+        nonisolated(unsafe) let unsafeSelf = self
         dispatchSyncNewThread {
-            let realm = self.realm()
+            let realm = unsafeSelf.realm()
             realm.beginWrite()
             fn(realm)
             try! realm.commitWrite()
@@ -847,6 +848,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
         token.invalidate()
     }
 
+    @MainActor
     func testObserveKeyPathNoChange() {
         let ex = expectation(description: "initial notification")
         let token0 = collection.observe(keyPaths: ["stringCol"]) { (changes: RealmCollectionChange) in
@@ -868,6 +870,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
         token0.invalidate()
     }
 
+    @MainActor
     func testObserveKeyPathWithLink() {
         var ex = expectation(description: "initial notification")
         let token = collection.observe(keyPaths: ["linkCol.id"]) { (changes: RealmCollectionChange) in
@@ -890,8 +893,9 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
 
         // Only expect a change notification for `linkCol.id` keypath.
         ex = self.expectation(description: "change notification")
+        nonisolated(unsafe) let unsafeSelf = self
         dispatchSyncNewThread {
-            let realm = self.realm()
+            let realm = unsafeSelf.realm()
             realm.beginWrite()
             let obj = realm.objects(CTTNullableStringObjectWithLink.self).first!
             obj.linkCol!.id = 2
@@ -901,6 +905,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
         token.invalidate()
     }
 
+    @MainActor
     func testObserveKeyPathWithLinkNoChange() {
         let ex = expectation(description: "initial notification")
         let token = collection.observe(keyPaths: ["linkCol.id"]) { (changes: RealmCollectionChange) in
@@ -922,6 +927,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
         token.invalidate()
     }
 
+    @MainActor
     func testObserveKeyPathWithLinkNoChangeList() {
         let ex = expectation(description: "initial notification")
         let token = collection.observe(keyPaths: ["linkCol"]) { (changes: RealmCollectionChange) in
@@ -943,6 +949,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
         token.invalidate()
     }
 
+    @MainActor
     func testObservePartialKeyPath() {
         var ex = expectation(description: "initial notification")
         let token0 = collection.observe(keyPaths: [\.stringCol]) { (changes: RealmCollectionChange) in
@@ -962,8 +969,9 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
 
         // Expect a change notification for the token observing `stringCol` keypath.
         ex = self.expectation(description: "change notification")
+        nonisolated(unsafe) let unsafeSelf = self
         dispatchSyncNewThread {
-            let realm = self.realm()
+            let realm = unsafeSelf.realm()
             realm.beginWrite()
             let obj = realm.objects(CTTNullableStringObjectWithLink.self).first!
             obj.stringCol = "changed"
@@ -973,6 +981,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
         token0.invalidate()
     }
 
+    @MainActor
     func testObservePartialKeyPathNoChange() {
         let ex = expectation(description: "initial notification")
         let token0 = collection.observe(keyPaths: [\.stringCol]) { (changes: RealmCollectionChange) in
@@ -994,6 +1003,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
         token0.invalidate()
     }
 
+    @MainActor
     func testObservePartialKeyPathWithLink() {
         var ex = expectation(description: "initial notification")
         let token = collection.observe(keyPaths: [\.linkCol?.id]) { (changes: RealmCollectionChange) in
@@ -1016,8 +1026,9 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
 
         // Only expect a change notification for `linkCol.id` keypath.
         ex = self.expectation(description: "change notification")
+        nonisolated(unsafe) let unsafeSelf = self
         dispatchSyncNewThread {
-            let realm = self.realm()
+            let realm = unsafeSelf.realm()
             realm.beginWrite()
             let obj = realm.objects(CTTNullableStringObjectWithLink.self).first!
             obj.linkCol!.id = 2
@@ -1027,6 +1038,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
         token.invalidate()
     }
 
+    @MainActor
     func testObservePartialKeyPathWithLinkNoChangeList() {
         let ex = expectation(description: "initial notification")
         let token = collection.observe(keyPaths: [\.linkCol]) { (changes: RealmCollectionChange) in
@@ -1050,7 +1062,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
 
     func testObserveOnQueue() {
         let sema = DispatchSemaphore(value: 0)
-        let token = collection.observe(keyPaths: nil, on: queue) { (changes: RealmCollectionChange) in
+        let token = collection.observe(keyPaths: nil, on: queue) { @Sendable (changes: RealmCollectionChange) in
             switch changes {
             case .initial(let collection):
                 XCTAssertEqual(collection.count, 2)
@@ -1113,7 +1125,7 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
     }
 
     func testThawFromDifferentThread() {
-        let frozen = collection.freeze()
+        nonisolated(unsafe) let frozen = collection.freeze()
         XCTAssertTrue(frozen.isFrozen)
 
         dispatchSyncNewThread {
@@ -1145,15 +1157,16 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
 
     func testThawUpdatedOnDifferentThread() {
         let tsr = ThreadSafeReference(to: collection)
-        var frozen: Collection?
-        var frozenQuery: Results<CTTNullableStringObjectWithLink>?
+        nonisolated(unsafe) var frozen: Collection?
+        nonisolated(unsafe) var frozenQuery: Results<CTTNullableStringObjectWithLink>?
 
         XCTAssertEqual(collection.count, 2) // stringCol "1" and "2"
         XCTAssertEqual(collection.filter("stringCol == %@", "3").count, 0)
         XCTAssertEqual(collection.where { $0.stringCol == "3" }.count, 0)
 
+        let configuration = self.collection.realm!.configuration
         dispatchSyncNewThread {
-            let realm = try! Realm(configuration: self.collection.realm!.configuration)
+            let realm = try! Realm(configuration: configuration)
             let collection = realm.resolve(tsr)!
             try! realm.write { collection.first!.stringCol = "3" }
             try! realm.write { realm.delete(collection.last!) }
@@ -1263,13 +1276,15 @@ class RealmCollectionTests<Collection: RealmCollection, AggregateCollection: Rea
     }
 
     func testFreezeFromWrongThread() {
+        nonisolated(unsafe) let unsafeSelf = self
+        nonisolated(unsafe) let unsafeCollection = self.collection!
         dispatchSyncNewThread {
-            self.assertThrows(self.collection.freeze(), reason: "Realm accessed from incorrect thread")
+            unsafeSelf.assertThrows(unsafeCollection.freeze(), reason: "Realm accessed from incorrect thread")
         }
     }
 
     func testAccessFrozenCollectionFromDifferentThread() {
-        let frozen = collection.freeze()
+        nonisolated(unsafe) let frozen = collection.freeze()
         dispatchSyncNewThread {
             XCTAssertEqual(frozen[0].stringCol, "1")
             XCTAssertEqual(frozen[1].stringCol, "2")
@@ -1398,6 +1413,7 @@ class ResultsTests: RealmCollectionTests<Results<CTTNullableStringObjectWithLink
         }
     }
 
+    @MainActor
     func testNotificationBlockUpdating() {
         var theExpectation = expectation(description: "")
         var calls = 0
@@ -1424,6 +1440,7 @@ class ResultsTests: RealmCollectionTests<Results<CTTNullableStringObjectWithLink
         token.invalidate()
     }
 
+    @MainActor
     func testNotificationBlockChangeIndices() {
         var theExpectation = expectation(description: "")
         var calls = 0
@@ -1747,7 +1764,6 @@ class ListUnmanagedRealmCollectionTests: ListRealmCollectionTests {
         assertThrows(collection.observe { _ in })
     }
 
-#if swift(>=5.8)
     @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
     override func testCancelTaskForObservationInit() async throws {}
     @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
@@ -1758,7 +1774,6 @@ class ListUnmanagedRealmCollectionTests: ListRealmCollectionTests {
     override func testObserveOnActorWithStringKeyPath() async throws {}
     @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
     override func testObserveOnActorWithKeyPath() async throws {}
-#endif
 
     override func testObserveKeyPath() {
         assertThrows(collection.observe { _ in })
@@ -1906,7 +1921,7 @@ class MutableSetRealmCollectionTests: RealmCollectionTests<MutableSet<CTTNullabl
     }
 
     override func testAccessFrozenCollectionFromDifferentThread() {
-        let frozen = collection.freeze()
+        nonisolated(unsafe) let frozen = collection.freeze()
         dispatchSyncNewThread {
             let o = frozen.map { $0.stringCol }
             XCTAssertTrue(o.contains("1"))
@@ -2001,7 +2016,6 @@ class MutableSetUnmanagedRealmCollectionTests: MutableSetRealmCollectionTests {
         assertThrows(collection.observe { _ in })
     }
 
-#if swift(>=5.8)
     @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
     override func testCancelTaskForObservationInit() async throws {}
     @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
@@ -2012,7 +2026,6 @@ class MutableSetUnmanagedRealmCollectionTests: MutableSetRealmCollectionTests {
     override func testObserveOnActorWithStringKeyPath() async throws {}
     @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
     override func testObserveOnActorWithKeyPath() async throws {}
-#endif
 
     override func testObserveOnQueue() {
         assertThrows(collection.observe(on: DispatchQueue(label: "bg")) { _ in })

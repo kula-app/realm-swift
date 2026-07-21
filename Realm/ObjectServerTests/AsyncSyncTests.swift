@@ -20,7 +20,7 @@
 
 import Realm
 import Realm.Private
-import RealmSwift
+@_spi(RealmSwiftExperimental) import RealmSwift
 import XCTest
 
 #if canImport(RealmTestSupport)
@@ -75,6 +75,22 @@ class AsyncAwaitSyncTests: SwiftSyncTestCase {
             errorHandler(error)
         } catch {
             XCTFail("Expected error of type \(E.self) but got \(error)")
+        }
+    }
+
+    func testUpdateBaseUrl() async throws {
+        let app = App(id: appId)
+        XCTAssertEqual(app.baseURL, "https://services.cloud.mongodb.com")
+
+        try await app.updateBaseUrl(to: "http://localhost:9090")
+        XCTAssertEqual(app.baseURL, "http://localhost:9090")
+
+        try await app.updateBaseUrl(to: "http://127.0.0.1:9090")
+        XCTAssertEqual(app.baseURL, "http://127.0.0.1:9090")
+
+        // Fails as this appId doesn't exist in prod
+        await assertThrowsError(try await app.updateBaseUrl(to: nil)) { (error: AppError) in
+            XCTAssertEqual(error.code, .unknown)
         }
     }
 
@@ -175,7 +191,7 @@ class AsyncAwaitSyncTests: SwiftSyncTestCase {
         try await write { realm in
             let object = SwiftCustomColumnObject()
             object.id = objectId
-            object.binaryCol = "string".data(using: String.Encoding.utf8)!
+            object.binaryCol = Data("string".utf8)
             let linkedObject = SwiftCustomColumnObject()
             linkedObject.id = linkedObjectId
             object.objectCol = linkedObject
@@ -192,7 +208,7 @@ class AsyncAwaitSyncTests: SwiftSyncTestCase {
         XCTAssertEqual(object.intCol, 1)
         XCTAssertEqual(object.doubleCol, 1.1)
         XCTAssertEqual(object.stringCol, "string")
-        XCTAssertEqual(object.binaryCol, "string".data(using: String.Encoding.utf8)!)
+        XCTAssertEqual(object.binaryCol, Data("string".utf8))
         XCTAssertEqual(object.dateCol, Date(timeIntervalSince1970: -1))
         XCTAssertEqual(object.longCol, 1)
         XCTAssertEqual(object.decimalCol, Decimal128(1))
@@ -263,8 +279,9 @@ class AsyncAwaitSyncTests: SwiftSyncTestCase {
 
         let configuration = try configuration()
         func isolatedOpen(_ actor: isolated CustomExecutorActor) async throws {
-            _ = try await Realm(configuration: configuration, actor: actor, downloadBeforeOpen: .always)
+            _ = try await Realm.open(configuration: configuration, downloadBeforeOpen: .always)
         }
+
 
         // Try opening the Realm with the Task being cancelled at every possible
         // point between executor invocations. This doesn't really test that
@@ -334,7 +351,7 @@ class AsyncAwaitSyncTests: SwiftSyncTestCase {
 
     func testUserCallFunctionAsyncAwait() async throws {
         let user = try await self.app.login(credentials: basicCredentials())
-        guard case let .int32(sum) = try await user.functions.sum([1, 2, 3, 4, 5]) else {
+        guard case let .int32(sum) = try await user.functions.sum(1, 2, 3, 4, 5) else {
             return XCTFail("Should be int32")
         }
         XCTAssertEqual(sum, 15)
@@ -402,9 +419,7 @@ class AsyncAwaitSyncTests: SwiftSyncTestCase {
 
     func testCustomUserDataAsyncAwait() async throws {
         let user = try await createUser()
-        _ = try await user.functions.updateUserData([
-            ["favourite_colour": "green", "apples": 10]
-        ])
+        _ = try await user.functions.updateUserData(["favourite_colour": "green", "apples": 10])
 
         try await user.refreshCustomData()
         XCTAssertEqual(user.customData["favourite_colour"], .string("green"))
@@ -426,6 +441,7 @@ class AsyncAwaitSyncTests: SwiftSyncTestCase {
         XCTAssertEqual(app.allUsers.count, 0)
     }
 
+    @MainActor
     func testSwiftAddObjectsAsync() async throws {
         let realm = try await openRealm()
         checkCount(expected: 0, realm, SwiftPerson.self)
@@ -447,7 +463,7 @@ class AsyncAwaitSyncTests: SwiftSyncTestCase {
         XCTAssertEqual(obj.intCol, 1)
         XCTAssertEqual(obj.doubleCol, 1.1)
         XCTAssertEqual(obj.stringCol, "string")
-        XCTAssertEqual(obj.binaryCol, "string".data(using: String.Encoding.utf8)!)
+        XCTAssertEqual(obj.binaryCol, Data("string".utf8))
         XCTAssertEqual(obj.decimalCol, Decimal128(1))
         XCTAssertEqual(obj.dateCol, Date(timeIntervalSince1970: -1))
         XCTAssertEqual(obj.longCol, Int64(1))
@@ -519,10 +535,11 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
         try await populateSwiftPerson(5)
 
         let user = try await createUser()
+        let name = self.name
         try await Task {
             var config = user.flexibleSyncConfiguration(initialSubscriptions: { subs in
                 subs.append(QuerySubscription<SwiftPerson> {
-                    $0.age > 0 && $0.firstName == self.name
+                    $0.age > 0 && $0.firstName == name
                 })
             })
             config.objectTypes = [SwiftPerson.self]
@@ -541,7 +558,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
 
         var config = user.flexibleSyncConfiguration(initialSubscriptions: { subs in
             subs.append(QuerySubscription<SwiftPerson> {
-                $0.age > 5 && $0.firstName == self.name
+                $0.age > 5 && $0.firstName == name
             })
         })
         config.objectTypes = [SwiftPerson.self]
@@ -551,7 +568,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
 
         var config2 = user.flexibleSyncConfiguration(initialSubscriptions: { subs in
             subs.append(QuerySubscription<SwiftPerson> {
-                $0.age > 0 && $0.firstName == self.name
+                $0.age > 0 && $0.firstName == name
             })
         })
         config2.objectTypes = [SwiftPerson.self]
@@ -605,9 +622,10 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
         }
 
         let user = try await createUser()
+        let name = self.name
         var config = user.flexibleSyncConfiguration(initialSubscriptions: { subscriptions in
             subscriptions.append(QuerySubscription<SwiftPerson>(name: "person_age_10") {
-                $0.age > 10 && $0.firstName == "\(self.name)"
+                $0.age > 10 && $0.firstName == "\(name)"
             })
         })
         config.objectTypes = [SwiftPerson.self]
@@ -623,10 +641,11 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
 
     @MainActor
     func testFlexibleSyncInitialSubscriptionsNotRerunOnOpen() async throws {
+        let name = self.name
         let user = try await createUser()
         var config = user.flexibleSyncConfiguration(initialSubscriptions: { subscriptions in
             subscriptions.append(QuerySubscription<SwiftPerson>(name: "person_age_10") {
-                $0.age > 10 && $0.firstName == "\(self.name)"
+                $0.age > 10 && $0.firstName == "\(name)"
             })
         })
         config.objectTypes = [SwiftPerson.self]
@@ -641,10 +660,11 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
     @MainActor
     func testFlexibleSyncInitialSubscriptionsRerunOnOpenNamedQuery() async throws {
         let user = try await createUser()
+        let name = self.name
         var config = user.flexibleSyncConfiguration(initialSubscriptions: { subscriptions in
             if subscriptions.first(named: "person_age_10") == nil {
                 subscriptions.append(QuerySubscription<SwiftPerson>(name: "person_age_10") {
-                    $0.age > 20 && $0.firstName == "\(self.name)"
+                    $0.age > 20 && $0.firstName == "\(name)"
                 })
             }
         }, rerunOnOpen: true)
@@ -682,6 +702,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
 
         let user = try await createUser()
         let isFirstOpen = Locked(true)
+        let name = self.name
         var config = user.flexibleSyncConfiguration(initialSubscriptions: { subscriptions in
             subscriptions.append(QuerySubscription<SwiftTypesSyncObject>(query: {
                 let date = isFirstOpen.wrappedValue ? Calendar.current.date(
@@ -692,7 +713,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
                         value: -20,
                         to: Date())
                 isFirstOpen.wrappedValue = false
-                return $0.stringCol == self.name && $0.dateCol < Date() && $0.dateCol > date!
+                return $0.stringCol == name && $0.dateCol < Date() && $0.dateCol > date!
             }))
         }, rerunOnOpen: true)
         config.objectTypes = [SwiftTypesSyncObject.self, SwiftPerson.self]
@@ -809,7 +830,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
             .subscribe(name: "8 or older")
         realm.syncSession!.suspend()
         let ex = XCTestExpectation(description: "no attempt to re-create subscription, returns immediately")
-        Task {
+        Task { @MainActor in
             _ = try await realm.objects(SwiftPerson.self)
                 .where { $0.firstName == name && $0.age >= 8 }
                 .subscribe(name: "8 or older")
@@ -859,7 +880,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
         let user = try await createUser()
         var config = user.flexibleSyncConfiguration()
         config.objectTypes = [SwiftPerson.self]
-        let realm = try await Realm(configuration: config, actor: MainActor.shared)
+        let realm = try await Realm(configuration: config)
         let results1 = try await realm.objects(SwiftPerson.self)
             .where { $0.firstName == name && $0.age > 8 }.subscribe(waitForSync: .onCreation)
         XCTAssertEqual(results1.count, 2)
@@ -874,12 +895,14 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
 
     @CustomGlobalActor
     func testSubscribeOnRealmConfinedCustomActor() async throws {
-        try await populateSwiftPerson()
+        nonisolated(unsafe) let unsafeSelf = self
+        try await unsafeSelf.populateSwiftPerson()
 
         let user = try await createUser()
         var config = user.flexibleSyncConfiguration()
         config.objectTypes = [SwiftPerson.self]
-        let realm = try await Realm(configuration: config, actor: CustomGlobalActor.shared)
+        let realm = try await Realm.open(configuration: config)
+        let name = self.name
         let results1 = try await realm.objects(SwiftPerson.self)
             .where { $0.firstName == name && $0.age > 8 }.subscribe(waitForSync: .onCreation)
         XCTAssertEqual(results1.count, 2)
@@ -941,6 +964,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
         XCTAssertEqual(realm.subscriptions.first!.name, "sub1")
     }
 
+    @MainActor
     func testUnsubscribeNoExistingMatch() async throws {
         try await populateSwiftPerson()
         let realm = try await openRealm()
@@ -1137,6 +1161,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
 
     // MARK: - Custom Column
 
+    @MainActor
     func testCustomColumnFlexibleSyncSchema() throws {
         let realm = try openRealm()
         for property in realm.schema.objectSchema.first(where: { $0.className == "SwiftCustomColumnObject" })!.properties {
@@ -1153,7 +1178,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
                                                    "intCol": 365,
                                                    "doubleCol": 365.365,
                                                    "stringCol": "@#¢∞¬÷÷",
-                                                   "binaryCol": "string".data(using: String.Encoding.utf8)!,
+                                                   "binaryCol": Data("string".utf8),
                                                    "dateCol": Date(timeIntervalSince1970: -365),
                                                    "longCol": 365,
                                                    "decimalCol": Decimal128(365),
@@ -1178,7 +1203,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
         XCTAssertEqual(foundObject!.intCol, 365)
         XCTAssertEqual(foundObject!.doubleCol, 365.365)
         XCTAssertEqual(foundObject!.stringCol, "@#¢∞¬÷÷")
-        XCTAssertEqual(foundObject!.binaryCol, "string".data(using: String.Encoding.utf8)!)
+        XCTAssertEqual(foundObject!.binaryCol, Data("string".utf8))
         XCTAssertEqual(foundObject!.dateCol, Date(timeIntervalSince1970: -365))
         XCTAssertEqual(foundObject!.longCol, 365)
         XCTAssertEqual(foundObject!.decimalCol, Decimal128(365))
@@ -1194,7 +1219,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
         try await write { realm in
             let object = SwiftCustomColumnObject()
             object.id = objectId
-            object.binaryCol = "string".data(using: String.Encoding.utf8)!
+            object.binaryCol = Data("string".utf8)
             let linkedObject = SwiftCustomColumnObject()
             linkedObject.id = linkedObjectId
             object.objectCol = linkedObject
@@ -1217,7 +1242,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
         XCTAssertEqual(foundObject!.intCol, 1)
         XCTAssertEqual(foundObject!.doubleCol, 1.1)
         XCTAssertEqual(foundObject!.stringCol, "string")
-        XCTAssertEqual(foundObject!.binaryCol, "string".data(using: String.Encoding.utf8)!)
+        XCTAssertEqual(foundObject!.binaryCol, Data("string".utf8))
         XCTAssertEqual(foundObject!.dateCol, Date(timeIntervalSince1970: -1))
         XCTAssertEqual(foundObject!.longCol, 1)
         XCTAssertEqual(foundObject!.decimalCol, Decimal128(1))
@@ -1233,7 +1258,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
         try await write { realm in
             let object = SwiftCustomColumnObject()
             object.id = objectId
-            object.binaryCol = "string".data(using: String.Encoding.utf8)!
+            object.binaryCol = Data("string".utf8)
             let linkedObject = SwiftCustomColumnObject()
             linkedObject.id = linkedObjectId
             object.objectCol = linkedObject
@@ -1256,7 +1281,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
         XCTAssertEqual(foundObject!.intCol, 1)
         XCTAssertEqual(foundObject!.doubleCol, 1.1)
         XCTAssertEqual(foundObject!.stringCol, "string")
-        XCTAssertEqual(foundObject!.binaryCol, "string".data(using: String.Encoding.utf8)!)
+        XCTAssertEqual(foundObject!.binaryCol, Data("string".utf8))
         XCTAssertEqual(foundObject!.dateCol, Date(timeIntervalSince1970: -1))
         XCTAssertEqual(foundObject!.longCol, 1)
         XCTAssertEqual(foundObject!.decimalCol, Decimal128(1))
@@ -1272,7 +1297,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
         try await write { realm in
             let object = SwiftCustomColumnObject()
             object.id = objectId
-            object.binaryCol = "string".data(using: String.Encoding.utf8)!
+            object.binaryCol = Data("string".utf8)
             let linkedObject = SwiftCustomColumnObject()
             linkedObject.id = linkedObjectId
             object.objectCol = linkedObject
@@ -1298,7 +1323,7 @@ class AsyncFlexibleSyncTests: SwiftSyncTestCase {
         XCTAssertEqual(foundObject!.intCol, 1)
         XCTAssertEqual(foundObject!.doubleCol, 1.1)
         XCTAssertEqual(foundObject!.stringCol, "string")
-        XCTAssertEqual(foundObject!.binaryCol, "string".data(using: String.Encoding.utf8)!)
+        XCTAssertEqual(foundObject!.binaryCol, Data("string".utf8))
         XCTAssertEqual(foundObject!.dateCol, Date(timeIntervalSince1970: -1))
         XCTAssertEqual(foundObject!.longCol, 1)
         XCTAssertEqual(foundObject!.decimalCol, Decimal128(1))

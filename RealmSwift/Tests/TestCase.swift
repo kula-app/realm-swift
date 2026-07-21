@@ -31,11 +31,24 @@ func inMemoryRealm(_ inMememoryIdentifier: String) -> Realm {
     return try! Realm(configuration: Realm.Configuration(inMemoryIdentifier: inMememoryIdentifier))
 }
 
-class TestCase: RLMTestCaseBase, @unchecked Sendable {
+@available(macOS 10.15, tvOS 13.0, iOS 13.0, watchOS 6.0, *)
+func openRealm(configuration: Realm.Configuration = .defaultConfiguration,
+               actor: isolated any Actor,
+               downloadBeforeOpen: Realm.OpenBehavior = .never) async throws -> Realm {
+    try await Realm.open(configuration: configuration, downloadBeforeOpen: downloadBeforeOpen)
+}
+
+class TestCase: RLMTestCaseBase {
     @Locked var exceptionThrown = false
     var testDir: String! = nil
 
     let queue = DispatchQueue(label: "background")
+
+    func configurationWithTestPath(configuration: Realm.Configuration = Realm.Configuration()) -> Realm.Configuration {
+        var configuration = configuration
+        configuration.fileURL = testRealmURL()
+        return configuration
+    }
 
     @discardableResult
     func realmWithTestPath(configuration: Realm.Configuration = Realm.Configuration()) -> Realm {
@@ -89,10 +102,20 @@ class TestCase: RLMTestCaseBase, @unchecked Sendable {
         }
     }
 
-    func dispatchSyncNewThread(block: @escaping () -> Void) {
+    func dispatchSyncNewThread(block: @Sendable @escaping () -> Void) {
         queue.async {
             autoreleasepool {
                 block()
+            }
+        }
+        queue.sync { }
+    }
+
+    func dispatchSyncBackground(block: @Sendable @escaping (TestCase) -> Void) {
+        nonisolated(unsafe) let unsafeSelf = self
+        queue.async {
+            autoreleasepool {
+                block(unsafeSelf)
             }
         }
         queue.sync { }

@@ -40,21 +40,18 @@ class SwiftIntProjection: Projection<SwiftIntObject> {
     @Projected(\SwiftIntObject.intCol) var intCol
 }
 
-private var smallRealm: Realm!
-private var mediumRealm: Realm!
-private var largeRealm: Realm!
-
-private let isRunningOnDevice = TARGET_IPHONE_SIMULATOR == 0
+private nonisolated(unsafe) var smallRealm: Realm!
+private nonisolated(unsafe) var mediumRealm: Realm!
+private nonisolated(unsafe) var largeRealm: Realm!
 
 @available(*, deprecated) // Silence deprecation warnings for RealmOptional
 class SwiftPerformanceTests: TestCase {
     override class var defaultTestSuite: XCTestSuite {
-#if !DEBUG && os(iOS) && !targetEnvironment(macCatalyst)
-        if isRunningOnDevice {
-            return super.defaultTestSuite
-        }
-#endif
+#if !DEBUG && os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+        return super.defaultTestSuite
+#else
         return XCTestSuite(name: "SwiftPerformanceTests")
+#endif
     }
 
     override class func setUp() {
@@ -418,7 +415,7 @@ class SwiftPerformanceTests: TestCase {
     }
 
     func testRealmCreationCached() {
-        var realm: Realm!
+        nonisolated(unsafe) var realm: Realm!
         dispatchSyncNewThread {
             realm = try! Realm()
         }
@@ -453,9 +450,12 @@ class SwiftPerformanceTests: TestCase {
     }
 
     func testSyncRealmCreationCached() {
-        var config = ObjectiveCSupport.convert(object: RLMRealmConfiguration.fakeSync())
-        config.objectTypes = []
-        var realm: Realm!
+        let config = {
+            var config = ObjectiveCSupport.convert(object: RLMRealmConfiguration.fakeSync())
+            config.objectTypes = []
+            return config
+        }()
+        nonisolated(unsafe) var realm: Realm!
         dispatchSyncNewThread {
             realm = try! Realm(configuration: config)
         }
@@ -468,9 +468,12 @@ class SwiftPerformanceTests: TestCase {
     }
 
     func testSyncRealmMultithreadedCacheLookup() {
-        var config = ObjectiveCSupport.convert(object: RLMRealmConfiguration.fakeSync())
-        config.objectTypes = []
-        var realm: Realm!
+        let config = {
+            var config = ObjectiveCSupport.convert(object: RLMRealmConfiguration.fakeSync())
+            config.objectTypes = []
+            return config
+        }()
+        nonisolated(unsafe) var realm: Realm!
         dispatchSyncNewThread {
             realm = try! Realm(configuration: config)
         }
@@ -493,9 +496,12 @@ class SwiftPerformanceTests: TestCase {
     }
 
     func testSyncRealmMultithreadedCreationCached() {
-        var config = ObjectiveCSupport.convert(object: RLMRealmConfiguration.fakeSync())
-        config.objectTypes = []
-        var realm: Realm!
+        let config = {
+            var config = ObjectiveCSupport.convert(object: RLMRealmConfiguration.fakeSync())
+            config.objectTypes = []
+            return config
+        }()
+        nonisolated(unsafe) var realm: Realm!
         dispatchSyncNewThread {
             realm = try! Realm(configuration: config)
         }
@@ -934,12 +940,11 @@ class SwiftPerformanceTests: TestCase {
 
 class SwiftSyncRealmPerformanceTests: TestCase {
     override class var defaultTestSuite: XCTestSuite {
-#if !DEBUG && os(iOS) && !targetEnvironment(macCatalyst)
-        if isRunningOnDevice {
-            return super.defaultTestSuite
-        }
-#endif
+#if !DEBUG && os(iOS) && !targetEnvironment(macCatalyst) && !targetEnvironment(simulator)
+        return super.defaultTestSuite
+#else
         return XCTestSuite(name: "SwiftSyncRealmPerformanceTests")
+#endif
     }
 
     override func measure(_ block: (() -> Void)) {
@@ -978,7 +983,7 @@ class SwiftSyncRealmPerformanceTests: TestCase {
 
     func testSyncRealmCreationCached() {
         let config = self.config
-        var realm: Realm!
+        nonisolated(unsafe) var realm: Realm!
         dispatchSyncNewThread {
             // Open on a different thread so that the test hits the path where
             // the cache lookup is a miss but there's a cached Realm on a

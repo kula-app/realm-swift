@@ -81,6 +81,43 @@ static NSString *generateRandomString(int num) {
 
 #pragma mark - Authentication and Tokens
 
+- (void)testUpdateBaseUrl {
+    RLMApp *app = self.app;
+    XCTAssertEqualObjects(app.baseURL, @"http://localhost:9090");
+
+    XCTestExpectation *expectation = [self expectationWithDescription:@"should update base url"];
+    [app updateBaseURL:@"http://127.0.0.1:9090" completion:^(NSError *error) {
+        XCTAssertNil(error);
+        [expectation fulfill];
+    }];
+    [self waitForExpectations:@[expectation]];
+    XCTAssertEqualObjects(app.baseURL, @"http://127.0.0.1:9090");
+
+    TimeoutProxyServer *proxy = [[TimeoutProxyServer alloc] initWithPort:7070 targetPort:9090];
+    proxy.delay = 0;
+    [proxy startAndReturnError:nil];
+
+    expectation = [self expectationWithDescription:@"should update base url"];
+    [app updateBaseURL:@"http://localhost:7070/" completion:^(NSError *error) {
+        XCTAssertNil(error);
+        [expectation fulfill];
+    }];
+    [self waitForExpectations:@[expectation]];
+    XCTAssertEqualObjects(app.baseURL, @"http://localhost:7070");
+    [proxy stop];
+
+    expectation = [self expectationWithDescription:@"should fail to update base url to default value"];
+    [app updateBaseURL:nil completion:^(NSError *error) {
+        // This fails because our local app doesn't exist in the prod env
+        XCTAssertNotNil(error);
+        XCTAssertEqual(error.code, RLMAppErrorUnknown);
+        [expectation fulfill];
+    }];
+    [self waitForExpectations:@[expectation]];
+    // baseURL update failed, so it's left unchanged
+    XCTAssertEqualObjects(app.baseURL, @"http://localhost:7070");
+}
+
 - (void)testAnonymousAuthentication {
     RLMUser *syncUser = self.anonymousUser;
     RLMUser *currentUser = [self.app currentUser];
@@ -497,7 +534,7 @@ static NSString *randomEmail() {
     [self.app loginWithCredential:credentials completion:^(RLMUser *user, NSError *error) {
         XCTAssertNil(user);
         RLMValidateError(error, RLMAppErrorDomain, RLMAppErrorInvalidPassword,
-                         @"invalid username/password");
+                         @"unauthorized");
         [expectation fulfill];
     }];
 
@@ -514,7 +551,7 @@ static NSString *randomEmail() {
     [self.app loginWithCredential:credentials completion:^(RLMUser *user, NSError *error) {
         XCTAssertNil(user);
         RLMValidateError(error, RLMAppErrorDomain, RLMAppErrorInvalidPassword,
-                         @"invalid username/password");
+                         @"unauthorized");
         [expectation fulfill];
     }];
 
@@ -899,7 +936,7 @@ static NSString *randomEmail() {
     c.encryptionKey = RLMGenerateKey();
     RLMAssertRealmExceptionContains([RLMRealm realmWithConfiguration:c error:nil],
                                     RLMErrorInvalidDatabase,
-                                    @"Failed to open Realm file at path '%@': Realm file decryption failed (Decryption failed: unable to decrypt after 0 seconds",
+                                    @"Failed to open Realm file at path '%@': Realm file decryption failed (Decryption failed: page 0 in file of size ",
                                     c.fileURL.path);
 }
 
@@ -1083,7 +1120,7 @@ static NSString *randomEmail() {
         [self logOutUser:user];
         [self addPersonsToRealm:realm
                         persons:@[[Person john], [Person paul], [Person ringo]]];
-        user = [self logInUserForCredentials:credentials];
+        [self logInUserForCredentials:credentials];
         [self waitForUploadsForRealm:realm];
         CHECK_COUNT(4, Person, realm);
         [realm.syncSession suspend];
@@ -1110,7 +1147,7 @@ static NSString *randomEmail() {
         // Log out the user.
         [self logOutUser:user];
         // Log the user back in.
-        user = [self logInUserForCredentials:credentials];
+        [self logInUserForCredentials:credentials];
 
         RLMRunChildAndWait();
 
@@ -1160,7 +1197,7 @@ static NSString *randomEmail() {
         [self addPersonsToRealm:realm persons:@[[Person john]]];
         CHECK_COUNT(1, Person, realm);
 
-        user = [self logInUserForCredentials:credentials];
+        [self logInUserForCredentials:credentials];
         [self waitForDownloadsForRealm:realm];
         CHECK_COUNT(4, Person, realm);
 
@@ -1266,7 +1303,7 @@ static NSString *randomEmail() {
     CHECK_COUNT(5, Person, realm2);
 
     // Open the Realm again and get the items.
-    realm = [self openRealmForPartitionValue:self.name user:user];
+    [self openRealmForPartitionValue:self.name user:user];
     CHECK_COUNT(5, Person, realm2);
 }
 

@@ -1,3 +1,10 @@
+> [!WARNING]
+> We announced the deprecation of Atlas Device Sync + Realm SDKs in September 2024. For more information please see:
+> - [SDK Deprecation](https://www.mongodb.com/docs/atlas/device-sdks/deprecation)
+> - [Device Sync Deprecation](https://www.mongodb.com/docs/atlas/app-services/sync/device-sync-deprecation)
+>
+> For a version of `realm-swift` without sync features, install version 20 or see the `community` branch.
+
 <picture>
     <source srcset="./media/logo-dark.svg" media="(prefers-color-scheme: dark)" alt="realm by MongoDB">
     <img src="./media/logo.svg" alt="realm by MongoDB">
@@ -107,8 +114,11 @@ Data can be encrypted in-flight and at-rest, keeping even the most sensitive dat
 ```swift
 // Generate a random encryption key
 var key = Data(count: 64)
-_ = key.withUnsafeMutableBytes { bytes in
-    SecRandomCopyBytes(kSecRandomDefault, 64, bytes)
+_ = key.withUnsafeMutableBytes { (pointer: UnsafeMutableRawBufferPointer) in
+    guard let baseAddress = pointer.baseAddress else {
+        fatalError("Failed to obtain base address")
+    }
+    SecRandomCopyBytes(kSecRandomDefault, 64, baseAddress)
 }
 
 // Add the encryption key to the config and open the realm
@@ -129,7 +139,7 @@ Interested in getting started for free with [a template application](https://git
 
 ## Documentation
 
-The documentation can be found at [mongodb.com/docs/atlas/device-sdks/sdk/swift/](https://www.mongodb.com/docs/atlas/device-sdks/sdk/swift//).
+The documentation can be found at [mongodb.com/docs/atlas/device-sdks/sdk/swift/](https://www.mongodb.com/docs/atlas/device-sdks/sdk/swift/).
 The API reference is located at [mongodb.com/docs/realm-sdks/swift/latest/](https://www.mongodb.com/docs/realm-sdks/swift/latest/)
 
 ## Getting Help

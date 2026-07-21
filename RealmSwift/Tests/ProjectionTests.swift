@@ -25,6 +25,9 @@ import XCTest
 import RealmTestSupport
 #endif
 
+// Keypaths are supposed to be Sendable but that never got implemented
+extension KeyPath: @retroactive @unchecked Sendable {}
+
 // MARK: Test objects definitions
 
 enum IntegerEnum: Int, PersistableEnum {
@@ -288,7 +291,7 @@ class ProjectionTests: TestCase {
             "floatCol": 15 as Float,
             "doubleCol": 16 as Double,
             "stringCol": "a",
-            "binaryCol": "b".data(using: .utf8)!,
+            "binaryCol": Data("b".utf8),
             "dateCol": Date(timeIntervalSince1970: 17),
             "decimalCol": 18 as Decimal128,
             "objectIdCol": ObjectId("6058f12b957ba06156586a7c"),
@@ -315,7 +318,7 @@ class ProjectionTests: TestCase {
             "optFloatCol": 35 as Float,
             "optDoubleCol": 36 as Double,
             "optStringCol": "c",
-            "optBinaryCol": "d".data(using: .utf8)!,
+            "optBinaryCol": Data("d".utf8),
             "optDateCol": Date(timeIntervalSince1970: 37),
             "optDecimalCol": 38 as Decimal128,
             "optObjectIdCol": ObjectId("6058f12b957ba06156586a7c"),
@@ -331,7 +334,7 @@ class ProjectionTests: TestCase {
             "arrayFloat": [1 as Float, 2 as Float, 3 as Float, 1 as Float],
             "arrayDouble": [1 as Double, 2 as Double, 3 as Double, 1 as Double],
             "arrayString": ["a", "b", "c"] as [String],
-            "arrayBinary": ["a".data(using: .utf8)!] as [Data],
+            "arrayBinary": [Data("a".utf8)] as [Data],
             "arrayDate": [Date(timeIntervalSince1970: 0), Date(timeIntervalSince1970: 1)] as [Date],
             "arrayDecimal": [1 as Decimal128, 2 as Decimal128],
             "arrayObjectId": [ObjectId("6058f12b957ba06156586a7c"), ObjectId("6058f12682b2fbb1f334ef1d")],
@@ -346,7 +349,7 @@ class ProjectionTests: TestCase {
             "arrayOptFloat": [1 as Float, 2 as Float, 3 as Float, 1 as Float, nil],
             "arrayOptDouble": [1 as Double, 2 as Double, 3 as Double, 1 as Double, nil],
             "arrayOptString": ["a", "b", "c", nil],
-            "arrayOptBinary": ["a".data(using: .utf8)!, nil],
+            "arrayOptBinary": [Data("a".utf8), nil],
             "arrayOptDate": [Date(timeIntervalSince1970: 0), Date(timeIntervalSince1970: 1), nil],
             "arrayOptDecimal": [1 as Decimal128, 2 as Decimal128, nil],
             "arrayOptObjectId": [ObjectId("6058f12b957ba06156586a7c"), ObjectId("6058f12682b2fbb1f334ef1d"), nil],
@@ -360,7 +363,7 @@ class ProjectionTests: TestCase {
             "setFloat": [1 as Float, 2 as Float, 3 as Float, 1 as Float],
             "setDouble": [1 as Double, 2 as Double, 3 as Double, 1 as Double],
             "setString": ["a", "b", "c"] as [String],
-            "setBinary": ["a".data(using: .utf8)!] as [Data],
+            "setBinary": [Data("a".utf8)] as [Data],
             "setDate": [Date(timeIntervalSince1970: 1), Date(timeIntervalSince1970: 2)] as [Date],
             "setDecimal": [1 as Decimal128, 2 as Decimal128],
             "setObjectId": [ObjectId("6058f12b957ba06156586a7c"),
@@ -378,7 +381,7 @@ class ProjectionTests: TestCase {
             "setOptFloat": [1 as Float, 2 as Float, 3 as Float, 1 as Float, nil],
             "setOptDouble": [1 as Double, 2 as Double, 3 as Double, 1 as Double, nil],
             "setOptString": ["a", "b", "c", nil],
-            "setOptBinary": ["a".data(using: .utf8)!, nil],
+            "setOptBinary": [Data("a".utf8), nil],
             "setOptDate": [Date(timeIntervalSince1970: 1), Date(timeIntervalSince1970: 2), nil],
             "setOptDecimal": [1 as Decimal128, 2 as Decimal128, nil],
             "setOptObjectId": [ObjectId("6058f12b957ba06156586a7c"), ObjectId("6058f12682b2fbb1f334ef1d"), nil],
@@ -395,7 +398,7 @@ class ProjectionTests: TestCase {
             "mapFloat": ["1": 1 as Float, "2": 2 as Float, "3": 3 as Float, "4": 1 as Float],
             "mapDouble": ["1": 1 as Double, "2": 2 as Double, "3": 3 as Double, "4": 1 as Double],
             "mapString": ["1": "a", "2": "b", "3": "c"] as [String: String],
-            "mapBinary": ["1": "a".data(using: .utf8)!] as [String: Data],
+            "mapBinary": ["1": Data("a".utf8)] as [String: Data],
             "mapDate": ["1": Date(timeIntervalSince1970: 1), "2": Date(timeIntervalSince1970: 2)] as [String: Date],
             "mapDecimal": ["1": 1 as Decimal128, "2": 2 as Decimal128],
             "mapObjectId": ["1": ObjectId("6058f12b957ba06156586a7c"),
@@ -413,7 +416,7 @@ class ProjectionTests: TestCase {
             "mapOptFloat": ["1": 1 as Float, "2": 2 as Float, "3": 3 as Float, "4": 1 as Float, "5": nil],
             "mapOptDouble": ["1": 1 as Double, "2": 2 as Double, "3": 3 as Double, "4": 1 as Double, "5": nil],
             "mapOptString": ["1": "a", "2": "b", "3": "c", "4": nil],
-            "mapOptBinary": ["1": "a".data(using: .utf8)!, "2": nil],
+            "mapOptBinary": ["1": Data("a".utf8), "2": nil],
             "mapOptDate": ["1": Date(timeIntervalSince1970: 1), "2": Date(timeIntervalSince1970: 2), "3": nil],
             "mapOptDecimal": ["1": 1 as Decimal128, "2": 2 as Decimal128, "3": nil],
             "mapOptObjectId": ["1": ObjectId("6058f12b957ba06156586a7c"),
@@ -691,7 +694,7 @@ class ProjectionTests: TestCase {
     func observeKeyPathChange<E: Equatable>(
         _ obj: AllTypesPrimitiveProjection,
         _ keyPath: ReferenceWritableKeyPath<AllTypesPrimitiveProjection, E>,
-        _ name: String, _ new: E, fileName: StaticString = #file, lineNumber: UInt = #line
+        _ name: String, _ new: E, fileName: StaticString = #filePath, lineNumber: UInt = #line
     ) {
         let old = obj[keyPath: keyPath]
         let (ex, token) = expectPropertyChange(obj, keyPath, name) { _, oldValue, newValue in
@@ -707,12 +710,14 @@ class ProjectionTests: TestCase {
 
         // Write on a background thread so that oldValue is present
         let tsr = ThreadSafeReference(to: obj)
+        nonisolated(unsafe) let newValue = new
+        nonisolated(unsafe) let unsafeSelf = self
         dispatchSyncNewThread {
-            let realm = self.realmWithTestPath()
+            let realm = unsafeSelf.realmWithTestPath()
             let obj = realm.resolve(tsr)!
             try! realm.write {
                 obj.int8Col = 5 // Write to another property to verify keypath filtering works
-                obj[keyPath: keyPath] = new
+                obj[keyPath: keyPath] = newValue
             }
         }
         wait(for: [ex], timeout: 2.0)
@@ -804,7 +809,7 @@ class ProjectionTests: TestCase {
         let obj = realm.objects(ModernAllTypesObject.self).first!
         let obs = realm.objects(AllTypesPrimitiveProjection.self).first!
 
-        let data = "c".data(using: String.Encoding.utf8)!
+        let data = Data("c".utf8)
         let date = Date(timeIntervalSince1970: 7)
         let decimal = Decimal128(number: 3)
         let objectId = ObjectId.generate()
@@ -945,6 +950,7 @@ class ProjectionTests: TestCase {
         observeKeyPathChange(obs, \.mapOptUuid, "mapOptUuid", uuid)
     }
 
+    @MainActor
     func testObserveKeyPath() {
         let realm = populatedRealm()
         let johnProjection = realm.objects(PersonProjection.self).filter("lastName == 'Snow'").first!
@@ -953,8 +959,9 @@ class ProjectionTests: TestCase {
         let token = johnProjection.observe(keyPaths: ["lastName"], on: nil) { _ in
             ex.fulfill()
         }
-        dispatchSyncNewThread {
-            let realm = self.realmWithTestPath()
+        nonisolated(unsafe) let unsafeSelf = self
+        dispatchSyncNewThread { @Sendable in
+            let realm = unsafeSelf.realmWithTestPath()
             try! realm.write {
                 let johnObject = realm.objects(CommonPerson.self).filter("lastName == 'Snow'").first!
                 johnObject.lastName = "Targaryen"
@@ -964,6 +971,7 @@ class ProjectionTests: TestCase {
         token.invalidate()
     }
 
+    @MainActor
     func testObserveNestedProjection() {
         let realm = populatedRealm()
         let johnProjection = realm.objects(PersonProjection.self).first!
@@ -978,8 +986,9 @@ class ProjectionTests: TestCase {
                 XCTFail("expected .change, got \(changes)")
             }
         }
-        dispatchSyncNewThread {
-            let realm = self.realmWithTestPath()
+        nonisolated(unsafe) let unsafeSelf = self
+        dispatchSyncNewThread { @Sendable in
+            let realm = unsafeSelf.realmWithTestPath()
             try! realm.write {
                 let johnObject = realm.objects(CommonPerson.self).filter("lastName == 'Snow'").first!
                 johnObject.extras?.phone?.mobile?.number = "529-345-678"
@@ -998,8 +1007,8 @@ class ProjectionTests: TestCase {
                 XCTFail("expected .change, got \(changes)")
             }
         }
-        dispatchSyncNewThread {
-            let realm = self.realmWithTestPath()
+        dispatchSyncNewThread { @Sendable in
+            let realm = unsafeSelf.realmWithTestPath()
             try! realm.write {
                 let johnObject = realm.objects(CommonPerson.self).filter("lastName == 'Snow'").first!
                 johnObject.extras?.email = "joe@realm.com"
@@ -1011,15 +1020,17 @@ class ProjectionTests: TestCase {
         ex = expectation(description: "testProjectionNotificationEmbeddedNested")
         let token3 = johnProjection.observe { changes in
             if case .change(_, let propertyChange) = changes {
-                XCTAssertEqual(propertyChange[0].name, "homeCity")
-                XCTAssertEqual(propertyChange[0].newValue as? String, "Barranquilla")
+                // this appears to be required due to an autoclosure bug
+                nonisolated(unsafe) let change = propertyChange[0]
+                XCTAssertEqual(change.name, "homeCity")
+                XCTAssertEqual(change.newValue as? String, "Barranquilla")
                 ex.fulfill()
             } else {
                 XCTFail("expected .change, got \(changes)")
             }
         }
-        dispatchSyncNewThread {
-            let realm = self.realmWithTestPath()
+        dispatchSyncNewThread { @Sendable in
+            let realm = unsafeSelf.realmWithTestPath()
             try! realm.write {
                 let johnObject = realm.objects(CommonPerson.self).filter("lastName == 'Snow'").first!
                 johnObject.address?.city = "Barranquilla"
@@ -1048,7 +1059,7 @@ class ProjectionTests: TestCase {
     }
 
     func observeChange<T: Equatable>(_ obj: AllTypesPrimitiveProjection, _ key: String, _ old: T?, _ new: T?,
-                                     fileName: StaticString = #file, lineNumber: UInt = #line, _ block: () -> Void) {
+                                     fileName: StaticString = #filePath, lineNumber: UInt = #line, _ block: () -> Void) {
         guard let change = observeChange(obj, key, block) else {
             return XCTFail("did not get a notification", file: fileName, line: lineNumber)
         }
@@ -1059,7 +1070,7 @@ class ProjectionTests: TestCase {
 
     func observeListChange(_ obj: AllTypesPrimitiveProjection, _ key: String, _ kind: NSKeyValueChange,
                            _ indexes: NSIndexSet = NSIndexSet(index: 0),
-                           fileName: StaticString = #file, lineNumber: UInt = #line, _ block: () -> Void) {
+                           fileName: StaticString = #filePath, lineNumber: UInt = #line, _ block: () -> Void) {
         guard let change = observeChange(obj, key, block) else {
             return XCTFail("did not get a notification", file: fileName, line: lineNumber)
         }
@@ -1081,7 +1092,7 @@ class ProjectionTests: TestCase {
     }
 
     func observeSetChange(_ obj: AllTypesPrimitiveProjection, _ key: String,
-                          fileName: StaticString = #file, lineNumber: UInt = #line, _ block: () -> Void) {
+                          fileName: StaticString = #filePath, lineNumber: UInt = #line, _ block: () -> Void) {
         guard let change = observeChange(obj, key, block) else {
             return XCTFail("did not get a notification", file: fileName, line: lineNumber)
         }
@@ -1093,7 +1104,7 @@ class ProjectionTests: TestCase {
     func testAllPropertyTypes() {
         var (obj, obs) = newObjects(allTypeValues)
 
-        let data = "b".data(using: String.Encoding.utf8)!
+        let data = Data("b".utf8)
         let date = Date(timeIntervalSince1970: 2)
         let decimal = Decimal128(number: 3)
         let objectId = ObjectId()
@@ -1590,7 +1601,7 @@ class ProjectionTests: TestCase {
         observeSetChange(obs, "mapOptUuid") { obj.mapOptUuid.removeObject(for: "key") }
     }
 
-#if swift(>=5.8)
+    @MainActor
     func testObserveOnActor() async throws {
         let projection = simpleProjection()
         let ex = expectation(description: "got change")
@@ -1623,7 +1634,6 @@ class ProjectionTests: TestCase {
         await fulfillment(of: [ex])
         tokens.forEach { $0.invalidate() }
     }
-#endif
 
     // MARK: Frozen Objects
 
@@ -1661,15 +1671,16 @@ class ProjectionTests: TestCase {
     }
 
     func testFreezeFromWrongThread() {
-        let projection = simpleProjection()
+        nonisolated(unsafe) let projection = simpleProjection()
+        nonisolated(unsafe) let unsafeSelf = self
         dispatchSyncNewThread {
-            self.assertThrows(projection.freeze(), "Realm accessed from incorrect thread")
+            unsafeSelf.assertThrows(projection.freeze(), "Realm accessed from incorrect thread")
         }
     }
 
     func testAccessFrozenObjectFromDifferentThread() {
         let projection = simpleProjection()
-        let frozen = projection.freeze()
+        nonisolated(unsafe) let frozen = projection.freeze()
         dispatchSyncNewThread {
             XCTAssertEqual(frozen.int, 0)
         }
@@ -1757,10 +1768,11 @@ class ProjectionTests: TestCase {
         let realm = realmWithTestPath()
         let projection = simpleProjection()
         let tsr = ThreadSafeReference(to: projection)
-        var frozen: SimpleProjection!
+        nonisolated(unsafe) var frozen: SimpleProjection!
 
+        nonisolated(unsafe) let unsafeSelf = self
         dispatchSyncNewThread {
-            let realm = self.realmWithTestPath()
+            let realm = unsafeSelf.realmWithTestPath()
             let resolvedProjection: SimpleProjection = realm.resolve(tsr)!
             try! realm.write {
                 resolvedProjection.int = 1
@@ -1777,9 +1789,10 @@ class ProjectionTests: TestCase {
     func testThawCreatedOnDifferentThread() {
         let realm = realmWithTestPath()
         XCTAssertEqual(realm.objects(SimpleProjection.self).count, 0)
-        var frozen: SimpleProjection!
+        nonisolated(unsafe) var frozen: SimpleProjection!
+        nonisolated(unsafe) let unsafeSelf = self
         dispatchSyncNewThread {
-            let projection = self.simpleProjection()
+            let projection = unsafeSelf.simpleProjection()
             frozen = projection.freeze()
         }
         XCTAssertNil(frozen.thaw())
@@ -1788,6 +1801,7 @@ class ProjectionTests: TestCase {
         XCTAssertEqual(realm.objects(SimpleProjection.self).count, 1)
     }
 
+    @MainActor
     func testObserveComputedChange() throws {
         let realm = populatedRealm()
         let johnProjection = realm.objects(PersonProjection.self).first!
@@ -1811,8 +1825,9 @@ class ProjectionTests: TestCase {
         // Wait for the notifier to be registered before we do the write
         realm.refresh()
 
-        dispatchSyncNewThread {
-            let realm = self.realmWithTestPath()
+        nonisolated(unsafe) let unsafeSelf = self
+        dispatchSyncNewThread { @Sendable in
+            let realm = unsafeSelf.realmWithTestPath()
             let johnObject = realm.objects(CommonPerson.self).filter("lastName == 'Snow'").first!
             try! realm.write {
                 johnObject.lastName = "Ali"
@@ -1845,8 +1860,9 @@ class ProjectionTests: TestCase {
 
         try! realm.write {}
 
+        nonisolated(unsafe) let unsafeSelf = self
         dispatchSyncNewThread {
-            let realm = self.realmWithTestPath()
+            let realm = unsafeSelf.realmWithTestPath()
             try! realm.write {
                 realm.objects(SimpleObject.self).first!.int = 2
             }

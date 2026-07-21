@@ -833,7 +833,7 @@ class RealmTests: TestCase {
     func testRemoveNotification() {
         let realm = try! Realm()
         var notificationCalled = false
-        let token = realm.observe { (_, realm) -> Void in
+        let token = realm.observe { (_, realm) in
             XCTAssertEqual(realm.configuration.fileURL, self.defaultRealmURL())
             notificationCalled = true
         }
@@ -842,6 +842,7 @@ class RealmTests: TestCase {
         XCTAssertFalse(notificationCalled)
     }
 
+    @MainActor
     func testAutorefresh() {
         let realm = try! Realm()
         XCTAssertTrue(realm.autorefresh, "Autorefresh should default to true")
@@ -858,7 +859,7 @@ class RealmTests: TestCase {
             notificationFired.fulfill()
         }
 
-        dispatchSyncNewThread {
+        dispatchSyncNewThread { @Sendable in
             let realm = try! Realm()
             try! realm.write {
                 realm.create(SwiftStringObject.self, value: ["string"])
@@ -873,6 +874,7 @@ class RealmTests: TestCase {
         XCTAssertEqual(results[0].stringCol, "string", "Value of first column should be 'string'")
     }
 
+    @MainActor
     func testRefresh() {
         let realm = try! Realm()
         realm.autorefresh = false
@@ -890,7 +892,7 @@ class RealmTests: TestCase {
         let results = realm.objects(SwiftStringObject.self)
         XCTAssertEqual(results.count, Int(0), "There should be 1 object of type StringObject")
 
-        dispatchSyncNewThread {
+        dispatchSyncNewThread { @Sendable in
             try! Realm().write {
                 _ = try! Realm().create(SwiftStringObject.self, value: ["string"])
             }
@@ -1020,7 +1022,7 @@ class RealmTests: TestCase {
     }
 
     func testEquals() {
-        let realm = try! Realm()
+        nonisolated(unsafe) let realm = try! Realm()
         XCTAssertTrue(try! realm == Realm())
 
         let testRealm = realmWithTestPath()
@@ -1063,7 +1065,7 @@ class RealmTests: TestCase {
     func testThaw() {
         XCTAssertEqual(try! Realm().objects(SwiftBoolObject.self).count, 0)
         let realm = try! Realm()
-        let frozenRealm = realm.freeze()
+        nonisolated(unsafe) let frozenRealm = realm.freeze()
         XCTAssert(frozenRealm.isFrozen)
 
         dispatchSyncNewThread {
@@ -1080,6 +1082,7 @@ class RealmTests: TestCase {
 
     // MARK: - Async Transactions
 
+    @MainActor
     func testAsyncTransactionShouldWrite() {
         let realm = try! Realm()
         let asyncComplete = expectation(description: "async transaction complete")
@@ -1095,6 +1098,7 @@ class RealmTests: TestCase {
         waitForExpectations(timeout: 1, handler: nil)
     }
 
+    @MainActor
     func testAsyncTransactionShouldWriteOnCommit() {
         let realm = try! Realm()
         let writeComplete = expectation(description: "async transaction complete")
@@ -1116,6 +1120,7 @@ class RealmTests: TestCase {
         XCTAssertEqual(realm.objects(SwiftStringObject.self).count, 1)
     }
 
+    @MainActor
     func testAsyncTransactionShouldCancel() {
         let realm = try! Realm()
         let asyncComplete = expectation(description: "async transaction complete")
@@ -1134,6 +1139,7 @@ class RealmTests: TestCase {
         XCTAssertNil(realm.objects(SwiftStringObject.self).first)
     }
 
+    @MainActor
     func testAsyncTransactionShouldCancelWithoutCommit() {
         let realm = try! Realm()
         let asyncComplete = expectation(description: "async transaction complete")
@@ -1149,6 +1155,7 @@ class RealmTests: TestCase {
         XCTAssertNil(realm.objects(SwiftStringObject.self).first)
     }
 
+    @MainActor
     func testAsyncTransactionShouldNotAutoCommitOnCanceledTransaction() {
         let realm = try! Realm()
         let waitComplete = expectation(description: "async wait complete")
@@ -1170,6 +1177,7 @@ class RealmTests: TestCase {
         XCTAssertNil(realm.objects(SwiftStringObject.self).first)
     }
 
+    @MainActor
     func testAsyncTransactionShouldAutorefresh() {
         let realm = try! Realm()
         realm.autorefresh = false
@@ -1201,6 +1209,7 @@ class RealmTests: TestCase {
         XCTAssertEqual(results[0].stringCol, "string")
     }
 
+    @MainActor
     func testAsyncTransactionSyncCommit() {
         let realm = try! Realm()
         let asyncComplete = expectation(description: "async transaction complete")
@@ -1222,6 +1231,7 @@ class RealmTests: TestCase {
         XCTAssertEqual(2, realm.objects(SwiftStringObject.self).count)
     }
 
+    @MainActor
     func testAsyncTransactionSyncAfterAsyncWithoutCommit() {
         let realm = try! Realm()
         XCTAssertEqual(0, realm.objects(SwiftStringObject.self).count)
@@ -1241,6 +1251,7 @@ class RealmTests: TestCase {
         XCTAssertEqual("string 2", realm.objects(SwiftStringObject.self).first?.stringCol)
     }
 
+    @MainActor
     func testAsyncTransactionWriteWithSync() {
         let realm = try! Realm()
         let asyncComplete = expectation(description: "async transaction complete")
@@ -1261,6 +1272,7 @@ class RealmTests: TestCase {
         XCTAssertEqual(2, realm.objects(SwiftStringObject.self).count)
     }
 
+    @MainActor
     func testAsyncTransactionMixedWithSync() {
         let realm = try! Realm()
         let asyncComplete = expectation(description: "async transaction complete")
@@ -1285,6 +1297,7 @@ class RealmTests: TestCase {
         XCTAssertEqual(3, realm.objects(SwiftStringObject.self).count)
     }
 
+    @MainActor
     func testAsyncTransactionMixedWithCancelledSync() {
         let realm = try! Realm()
         let asyncComplete = expectation(description: "async transaction complete")
@@ -1309,6 +1322,7 @@ class RealmTests: TestCase {
         XCTAssertEqual(2, realm.objects(SwiftStringObject.self).count)
     }
 
+    @MainActor
     func testAsyncTransactionChangeNotification() {
         let realm = try! Realm()
         let asyncWriteComplete = expectation(description: "async write complete")
@@ -1345,6 +1359,7 @@ class RealmTests: TestCase {
         token.invalidate()
     }
 
+    @MainActor
     func testBeginAsyncTransactionInAsyncTransaction() {
         let realm = try! Realm()
         let transaction1 = expectation(description: "async transaction 1 complete")
@@ -1369,6 +1384,7 @@ class RealmTests: TestCase {
         XCTAssertEqual(2, realm.objects(SwiftStringObject.self).count)
     }
 
+    @MainActor
     func testAsyncTransactionFromSyncTransaction() {
         let realm = try! Realm()
         let transaction1 = expectation(description: "async transaction 1 complete")
@@ -1389,6 +1405,7 @@ class RealmTests: TestCase {
         XCTAssertEqual(2, realm.objects(SwiftStringObject.self).count)
     }
 
+    @MainActor
     func testAsyncTransactionCancel() {
         let waitComplete = expectation(description: "async wait complete")
         let expectation = XCTestExpectation(description: "testAsyncTransactionCancel expectation")
@@ -1396,7 +1413,7 @@ class RealmTests: TestCase {
         let unexpectation = XCTestExpectation(description: "should not fulfill")
         unexpectation.isInverted = true
 
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { @MainActor in
             let realm = try! Realm()
             realm.beginAsyncWrite {
                 realm.create(SwiftStringObject.self, value: ["string"])
@@ -1425,6 +1442,7 @@ class RealmTests: TestCase {
         XCTAssertEqual(2, realm.objects(SwiftStringObject.self).count)
     }
 
+    @MainActor
     func testAsyncTransactionCommit() {
         let realm = try! Realm()
         let changesAddedExpectation = expectation(description: "testAsyncTransactionCommit expectation")
@@ -1450,6 +1468,7 @@ class RealmTests: TestCase {
         XCTAssertEqual(1, realm.objects(SwiftStringObject.self).count)
     }
 
+    @MainActor
     func testAsyncTransactionShouldWriteObjectFromOutsideOfTransaction() {
         let realm = try! Realm()
         let asyncComplete = expectation(description: "async transaction complete")
@@ -1468,6 +1487,7 @@ class RealmTests: TestCase {
         XCTAssertNotNil(realm.objects(SwiftStringObject.self).first { $0.stringCol == "string I" })
     }
 
+    @MainActor
     func testAsyncTransactionShouldChangeExistingObject() {
         let realm = try! Realm()
         let asyncComplete = expectation(description: "async transaction complete")
@@ -1492,14 +1512,12 @@ class RealmTests: TestCase {
 @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
 @available(*, deprecated) // Silence deprecation warnings for RealmOptional
 extension RealmTests {
-#if swift(>=5.8)
-
     @MainActor
     func testOpenBehaviorForLocalRealm() async throws {
         let realm = try await Realm(downloadBeforeOpen: .always)
         _ = try await Realm(downloadBeforeOpen: .always)
         _ = try await Task { @CustomGlobalActor in
-            _ = try await Realm(actor: CustomGlobalActor.shared, downloadBeforeOpen: .always)
+            _ = try await openRealm(actor: CustomGlobalActor.shared, downloadBeforeOpen: .always)
         }.value
         realm.invalidate()
     }
@@ -1515,7 +1533,7 @@ extension RealmTests {
 
     @MainActor
     func testAsyncRefresh() async throws {
-        let realm = try await Realm(actor: MainActor.shared)
+        let realm = try await openRealm(actor: MainActor.shared)
         realm.autorefresh = false
 
         let results = realm.objects(SwiftStringObject.self)
@@ -1524,7 +1542,7 @@ extension RealmTests {
         XCTAssertFalse(didRefresh)
 
         try await Task { @CustomGlobalActor in
-            let realm = try await Realm(actor: CustomGlobalActor.shared)
+            let realm = try await openRealm(actor: CustomGlobalActor.shared)
             try! realm.write {
                 _ = realm.create(SwiftStringObject.self, value: ["string"])
             }
@@ -1644,16 +1662,23 @@ extension RealmTests {
 
     @available(macOS 10.15.4, iOS 13.4, tvOS 13.4, watchOS 6.4, *)
     func testAsyncRefreshOnQueueConfinedRealm() async throws {
-        @Locked var realm: Realm!
+        let realm = Locked<Realm?>(wrappedValue: nil)
+        let queue = self.queue
         dispatchSyncNewThread {
-            realm = try! Realm(queue: self.queue)
+            realm.wrappedValue = try! Realm(queue: queue)
         }
-        try await assertPreconditionFailure("asyncRefresh() can only be called on main thread or actor-isolated Realms") {
-            _ = await realm.asyncRefresh()
-        }
-        try await assertPreconditionFailure("asyncWrite() can only be called on main thread or actor-isolated Realms") {
-            _ = try await realm.asyncWrite { }
-        }
+        // asyncRefresh() has to be called from a statically isolated context,
+        // but the test as whole can't be isolated (or the dispatch async breaks),
+        // and we have to hop to the actor before fork and not after or the child
+        // crashes before we get to the precondition
+        try await Task { @MainActor in
+            try await assertPreconditionFailure("asyncRefresh() can only be called on main thread or actor-isolated Realms") {
+                _ = await realm.wrappedValue!.asyncRefresh()
+            }
+            try await assertPreconditionFailure("asyncWrite() can only be called on main thread or actor-isolated Realms") {
+                _ = try await realm.wrappedValue!.asyncWrite { }
+            }
+        }.value
     }
 
     @MainActor
@@ -1680,7 +1705,7 @@ extension RealmTests {
 
     @MainActor
     func testAsyncWriteBasics() async throws {
-        let realm = try await Realm(actor: MainActor.shared)
+        let realm = try await openRealm(actor: MainActor.shared)
         let obj = try await realm.asyncWrite {
             XCTAssertTrue(realm.isInWriteTransaction)
             XCTAssertTrue(realm.isPerformingAsynchronousWriteOperations)
@@ -1694,7 +1719,7 @@ extension RealmTests {
 
     @MainActor
     func testAsyncWriteCancel() async throws {
-        let realm = try await Realm(actor: MainActor.shared)
+        let realm = try await openRealm(actor: MainActor.shared)
         try await realm.asyncWrite {
             realm.create(SwiftStringObject.self, value: ["foo"])
             realm.cancelWrite()
@@ -1705,7 +1730,7 @@ extension RealmTests {
 
     @MainActor
     func testAsyncWriteBeginNewWriteAfterCancel() async throws {
-        let realm = try await Realm(actor: MainActor.shared)
+        let realm = try await openRealm(actor: MainActor.shared)
         try await realm.asyncWrite {
             realm.create(SwiftStringObject.self, value: ["foo"])
             realm.cancelWrite()
@@ -1719,7 +1744,7 @@ extension RealmTests {
 
     @MainActor
     func testAsyncWriteModifyExistingObject() async throws {
-        let realm = try await Realm(actor: MainActor.shared)
+        let realm = try await openRealm(actor: MainActor.shared)
         let obj = try await realm.asyncWrite {
             realm.create(SwiftStringObject.self, value: ["foo"])
         }
@@ -1731,7 +1756,7 @@ extension RealmTests {
 
     @MainActor
     func testAsyncWriteCancelsOnThrow() async throws {
-        let realm = try await Realm(actor: MainActor.shared)
+        let realm = try await openRealm(actor: MainActor.shared)
 
         await assertThrowsErrorAsync(try await realm.asyncWrite {
             realm.create(SwiftStringObject.self, value: ["foo"])
@@ -1749,7 +1774,7 @@ extension RealmTests {
 
     @CustomGlobalActor
     func testAsyncWriteCustomGlobalActor() async throws {
-        let realm = try await Realm(actor: CustomGlobalActor.shared)
+        let realm = try await openRealm(actor: CustomGlobalActor.shared)
         let obj = try await realm.asyncWrite {
             realm.create(SwiftStringObject.self, value: ["foo"])
         }
@@ -1766,7 +1791,7 @@ extension RealmTests {
             var realm: Realm!
             var obj: SwiftStringObject?
             init() async throws {
-                realm = try await Realm(actor: self)
+                realm = try await openRealm(actor: self)
             }
 
             var count: Int {
@@ -1815,12 +1840,12 @@ extension RealmTests {
 
     @MainActor
     func testAsyncWriteTaskCancellation() async throws {
-        let realm = try await Realm(actor: MainActor.shared)
+        let realm = try await openRealm(actor: MainActor.shared)
         realm.beginWrite()
 
         let ex = expectation(description: "Background thread ready")
         let task = Task { @CustomGlobalActor in
-            let realm = try await Realm(actor: CustomGlobalActor.shared)
+            let realm = try await openRealm(actor: CustomGlobalActor.shared)
             ex.fulfill()
             try await realm.asyncWrite {
                 XCTFail("Should not have been called")
@@ -1838,12 +1863,12 @@ extension RealmTests {
 
     @MainActor
     func testAsyncWriteTaskCancelledBeforeWriteCalled() async throws {
-        let realm = try await Realm(actor: MainActor.shared)
+        let realm = try await openRealm(actor: MainActor.shared)
         realm.beginWrite()
 
         let ex = expectation(description: "Background thread ready")
         let task = Task { @CustomGlobalActor in
-            let realm = try await Realm(actor: CustomGlobalActor.shared)
+            let realm = try await openRealm(actor: CustomGlobalActor.shared)
             ex.fulfill()
             // Block until cancelWrite() is called, ensuring that the Task is
             // cancelled before the call to asyncWrite
@@ -1863,7 +1888,7 @@ extension RealmTests {
     // FIXME: deadlocks without https://github.com/realm/realm-core/pull/6413
     @MainActor
     func skip_testAsyncWriteTaskCancellationTiming() async throws {
-        let realm = try await Realm(actor: MainActor.shared)
+        let realm = try await openRealm(actor: MainActor.shared)
         realm.beginWrite()
 
         // Try to hit the timing windows which can't be deterministically tested
@@ -1872,7 +1897,7 @@ extension RealmTests {
         for _ in 0..<1000 {
             let ex = expectation(description: "Background thread ready")
             let task = Task { @CustomGlobalActor in
-                let realm = try await Realm(actor: CustomGlobalActor.shared)
+                let realm = try await openRealm(actor: CustomGlobalActor.shared)
                 // Tearing down a Realm which is in the middle of async writes
                 // is itself async, so we need to explicitly wait for that to
                 // happen or we'll hit a data race when we try to close all
@@ -1889,16 +1914,19 @@ extension RealmTests {
         }
         realm.cancelWrite()
     }
-#endif // swift(>=5.8)
 }
 
 @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
 @globalActor actor CustomGlobalActor: GlobalActor {
+#if compiler(<6.2)
     static var shared = CustomGlobalActor()
+#else
+    static let shared = CustomGlobalActor()
+#endif
 }
 
 @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
-extension CancellationError: Equatable {
+extension CancellationError: @retroactive Equatable {
     public static func == (lhs: CancellationError, rhs: CancellationError) -> Bool {
         true
     }
@@ -1942,7 +1970,7 @@ class LoggerTests: TestCase {
         Logger.shared = logger
     }
     func testSetDefaultLogLevel() throws {
-        var logs: String = ""
+        nonisolated(unsafe) var logs: String = ""
         let logger = Logger(level: .off) { level, message in
             logs += "\(Date.now) \(level.logLevel) \(message)"
         }
@@ -1959,7 +1987,7 @@ class LoggerTests: TestCase {
     }
 
     func testDefaultLogger() throws {
-        var logs: String = ""
+        nonisolated(unsafe) var logs: String = ""
         let logger = Logger(level: .off) { level, message in
             logs += "\(Date.now) \(level.logLevel) \(message)"
         }

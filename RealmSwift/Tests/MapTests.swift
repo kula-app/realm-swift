@@ -709,19 +709,17 @@ class MapTests: TestCase {
         let mapObj = createMap()
         try! mapObj.realm!.commitWrite()
 
-        let exp = expectation(description: "does receive notification")
+        let ex = expectation(description: "does receive notification")
         let token = mapObj.observe(on: queue) { change in
             switch change {
             case .initial(let map):
                 XCTAssertNotNil(map)
-                exp.fulfill()
-            case .update:
-                XCTFail("should not get here for this test")
-            case .error:
+                ex.fulfill()
+            default:
                 XCTFail("should not get here for this test")
             }
         }
-        waitForExpectations(timeout: 2.0, handler: nil)
+        wait(for: [ex], timeout: 2.0)
         token.invalidate()
         queue.sync { }
     }
@@ -756,27 +754,27 @@ class MapTests: TestCase {
                 XCTFail("should not get here for this test")
             }
         }
-        waitForExpectations(timeout: 2.0, handler: nil)
+        wait(for: [exp], timeout: 2.0)
         exp = expectation(description: "does receive notification")
         try! realm.write {
             mapObj["myNewKey"] = SwiftStringObject(value: ["one"])
             mapObj["anotherNewKey"] = SwiftStringObject(value: ["two"])
         }
-        waitForExpectations(timeout: 2.0, handler: nil)
+        wait(for: [exp], timeout: 2.0)
         XCTAssertTrue(didInsert)
 
         exp = expectation(description: "does receive notification")
         try! realm.write {
             mapObj["myNewKey"] = SwiftStringObject(value: ["three"])
         }
-        waitForExpectations(timeout: 2.0, handler: nil)
+        wait(for: [exp], timeout: 2.0)
 
         exp = expectation(description: "does receive notification")
         XCTAssertTrue(didModify)
         try! realm.write {
             mapObj["myNewKey"] = nil
         }
-        waitForExpectations(timeout: 2.0, handler: nil)
+        wait(for: [exp], timeout: 2.0)
         XCTAssertTrue(didDelete)
 
         token.invalidate()
@@ -804,19 +802,19 @@ class MapTests: TestCase {
             }
             ex.fulfill()
         }
-        waitForExpectations(timeout: 0.1, handler: nil)
+        wait(for: [ex], timeout: 2.0)
 
         /* Expect notification on "intCol" key path when intCol is changed */
         ex = expectation(description: "change notification")
-        dispatchSyncNewThread {
-            let realm = self.realmWithTestPath()
+        dispatchSyncBackground { unsafeSelf in
+            let realm = unsafeSelf.realmWithTestPath()
             realm.beginWrite()
             let obj = realm.objects(SwiftMapPropertyObject.self).first!
             let value = obj.swiftObjectMap["first"]!!
             value.intCol = 8
             try! realm.commitWrite()
         }
-        waitForExpectations(timeout: 0.1, handler: nil)
+        wait(for: [ex], timeout: 2.0)
         token.invalidate()
     }
 
@@ -839,20 +837,20 @@ class MapTests: TestCase {
             }
             ex.fulfill()
         }
-        waitForExpectations(timeout: 0.1, handler: nil)
+        wait(for: [ex], timeout: 0.1)
 
         /* Expect no notification on "intCol" key path when stringCol is changed */
         ex = expectation(description: "NO change notification")
         ex.isInverted = true
-        dispatchSyncNewThread {
-            let realm = self.realmWithTestPath()
+        dispatchSyncBackground { unsafeSelf in
+            let realm = unsafeSelf.realmWithTestPath()
             realm.beginWrite()
             let obj = realm.objects(SwiftMapPropertyObject.self).first!
             let value = obj.swiftObjectMap["first"]!!
             value.stringCol = "new string"
             try! realm.commitWrite()
         }
-        waitForExpectations(timeout: 0.1, handler: nil)
+        wait(for: [ex], timeout: 0.1)
         token.invalidate()
     }
 
@@ -878,18 +876,18 @@ class MapTests: TestCase {
             }
             ex.fulfill()
         }
-        waitForExpectations(timeout: 0.1, handler: nil)
+        wait(for: [ex], timeout: 0.1)
 
         /* Expect notification on "intCol" key path when intCol is changed */
         ex = expectation(description: "change notification")
-        dispatchSyncNewThread {
-            let realm = self.realmWithTestPath()
+        dispatchSyncBackground { unsafeSelf in
+            let realm = unsafeSelf.realmWithTestPath()
             realm.beginWrite()
             let obj = realm.objects(SwiftMapPropertyObject.self).first!
             obj.swiftObjectMap.removeObject(for: "first")
             try! realm.commitWrite()
         }
-        waitForExpectations(timeout: 0.1, handler: nil)
+        wait(for: [ex], timeout: 0.1)
         token.invalidate()
     }
 
@@ -915,18 +913,18 @@ class MapTests: TestCase {
             }
             ex.fulfill()
         }
-        waitForExpectations(timeout: 0.1, handler: nil)
+        wait(for: [ex], timeout: 0.1)
 
         ex = expectation(description: "change notification")
-        dispatchSyncNewThread {
-            let realm = self.realmWithTestPath()
+        dispatchSyncBackground { unsafeSelf in
+            let realm = unsafeSelf.realmWithTestPath()
             realm.beginWrite()
             let obj = realm.objects(SwiftMapPropertyObject.self).first!
             let value = obj.swiftObjectMap["first"]!!
             realm.delete(value)
             try! realm.commitWrite()
         }
-        waitForExpectations(timeout: 0.1, handler: nil)
+        wait(for: [ex], timeout: 0.1)
         token.invalidate()
     }
 
@@ -954,21 +952,20 @@ class MapTests: TestCase {
             }
             ex.fulfill()
         }
-        waitForExpectations(timeout: 0.1, handler: nil)
+        wait(for: [ex], timeout: 0.1)
 
         ex = expectation(description: "change notification")
-        dispatchSyncNewThread {
-            let realm = self.realmWithTestPath()
+        dispatchSyncBackground { unsafeSelf in
+            let realm = unsafeSelf.realmWithTestPath()
             realm.beginWrite()
             let obj = realm.objects(SwiftOwnerObject.self).first!
             obj.name = "Curley"
             try! realm.commitWrite()
         }
-        waitForExpectations(timeout: 0.1, handler: nil)
+        wait(for: [ex], timeout: 0.1)
         token.invalidate()
     }
 
-#if swift(>=5.8)
     @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
     @MainActor func testObserveOnActor() async throws {
         let map = createMapObject().swiftObjectMap
@@ -1030,7 +1027,6 @@ class MapTests: TestCase {
         await fulfillment(of: [changeEx])
         token.invalidate()
     }
-#endif // swift(>=5.8)
 }
 
 class MapStandaloneTests: MapTests {
@@ -1081,7 +1077,6 @@ class MapStandaloneTests: MapTests {
         assertThrows(mapObj.observe {_ in })
     }
 
-#if swift(>=5.8)
     @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
     @MainActor override func testObserveOnActor() async throws {
     }
@@ -1089,7 +1084,6 @@ class MapStandaloneTests: MapTests {
     @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
     @MainActor override func testObserveOnActorTypedKeyPath() async throws {
     }
-#endif
 }
 
 class MapNewlyAddedTests: MapTests {

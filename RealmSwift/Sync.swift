@@ -584,7 +584,9 @@ public typealias InitialSubscriptionsConfiguration = RLMInitialSubscriptionsConf
         config.initialSubscriptions
     }
 
-    @Unchecked internal var config: RLMSyncConfiguration
+    // Although RLMSyncConfiguration objects are mutable, we don't expose a way
+    // to mutate the one wrapped by this struct, which makes this safe
+    nonisolated(unsafe) internal let config: RLMSyncConfiguration
     internal init(config: RLMSyncConfiguration) {
         self.config = config
     }
@@ -667,15 +669,8 @@ public struct FunctionCallable: Sendable {
     fileprivate let name: String
     fileprivate let user: User
 
-    /// The implementation of @dynamicCallable that allows  for `Future<AnyBSON, Error>` callable return.
-    ///
-    ///     let cancellable = user.functions.sum([1, 2, 3, 4, 5])
-    ///        .sink(receiveCompletion: { result in
-    ///     }, receiveValue: { value in
-    ///        // Returned value from function
-    ///     })
-    ///
-    @preconcurrency
+    /// :nodoc:
+    @available(*, deprecated, message: "Specify args separately without wrapping them in an array")
     @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
     public func dynamicallyCall(withArguments args: [[AnyBSON]]) -> Future<AnyBSON, Error> {
         return future { promise in
@@ -689,6 +684,54 @@ public struct FunctionCallable: Sendable {
             }
         }
     }
+
+    /// The implementation of @dynamicCallable that allows  for `Future<AnyBSON, Error>` callable return.
+    ///
+    ///     let cancellable = user.functions.sum(1, 2, 3, 4, 5)
+    ///        .sink(receiveCompletion: { result in
+    ///     }, receiveValue: { value in
+    ///        // Returned value from function
+    ///     })
+    ///
+    @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
+    public func dynamicallyCall(withArguments args: [AnyBSON]) -> Future<AnyBSON, Error> {
+        return future { promise in
+            let objcArgs = args.map(ObjectiveCSupport.convertBson)
+            self.user.__callFunctionNamed(name, arguments: objcArgs) { (bson: RLMBSON?, error: Error?) in
+                if let b = bson.map(ObjectiveCSupport.convertBson), let bson = b {
+                    promise(.success(bson))
+                } else {
+                    promise(.failure(error ?? Realm.Error.callFailed))
+                }
+            }
+        }
+    }
+}
+
+private func setSyncFields(_ config: RLMRealmConfiguration, clientResetMode: ClientResetMode,
+                           cancelAsyncOpenOnNonFatalErrors: Bool) {
+    let syncConfig = config.syncConfiguration!
+    syncConfig.cancelAsyncOpenOnNonFatalErrors = cancelAsyncOpenOnNonFatalErrors
+    switch clientResetMode {
+    case .manual(let block):
+        syncConfig.clientResetMode = .manual
+        syncConfig.manualClientResetHandler = block
+    case .discardUnsyncedChanges(let beforeBlock, let afterBlock),
+            .discardLocal(let beforeBlock, let afterBlock):
+        syncConfig.clientResetMode = .discardUnsyncedChanges
+        syncConfig.beforeClientReset = ObjectiveCSupport.convert(object: beforeBlock)
+        syncConfig.afterClientReset = ObjectiveCSupport.convert(object: afterBlock)
+    case .recoverUnsyncedChanges(let beforeBlock, let afterBlock):
+        syncConfig.clientResetMode = .recoverUnsyncedChanges
+        syncConfig.beforeClientReset = ObjectiveCSupport.convert(object: beforeBlock)
+        syncConfig.afterClientReset = ObjectiveCSupport.convert(object: afterBlock)
+    case .recoverOrDiscardUnsyncedChanges(let beforeBlock, let afterBlock):
+        syncConfig.clientResetMode = .recoverOrDiscardUnsyncedChanges
+        syncConfig.beforeClientReset = ObjectiveCSupport.convert(object: beforeBlock)
+        syncConfig.afterClientReset = ObjectiveCSupport.convert(object: afterBlock)
+    }
+
+    config.syncConfiguration = syncConfig
 }
 
 public extension User {
@@ -727,31 +770,8 @@ public extension User {
     func configuration(partitionValue: AnyBSON,
                        clientResetMode: ClientResetMode = .recoverUnsyncedChanges(beforeReset: nil, afterReset: nil),
                        cancelAsyncOpenOnNonFatalErrors: Bool = false) -> Realm.Configuration {
-        var config: RLMRealmConfiguration
-        switch clientResetMode {
-        case .manual(let manualClientReset):
-            config = self.__configuration(withPartitionValue: ObjectiveCSupport.convert(object: partitionValue),
-                                          clientResetMode: .manual,
-                                          manualClientResetHandler: manualClientReset)
-        case .discardUnsyncedChanges(let beforeClientReset, let afterClientReset), .discardLocal(let beforeClientReset, let afterClientReset):
-            config = self.__configuration(withPartitionValue: ObjectiveCSupport.convert(object: partitionValue),
-                                          clientResetMode: .discardUnsyncedChanges,
-                                          notifyBeforeReset: ObjectiveCSupport.convert(object: beforeClientReset),
-                                          notifyAfterReset: ObjectiveCSupport.convert(object: afterClientReset))
-        case .recoverUnsyncedChanges(let beforeClientReset, let afterClientReset):
-            config = self.__configuration(withPartitionValue: ObjectiveCSupport.convert(object: partitionValue),
-                                          clientResetMode: .recoverUnsyncedChanges,
-                                          notifyBeforeReset: ObjectiveCSupport.convert(object: beforeClientReset),
-                                          notifyAfterReset: ObjectiveCSupport.convert(object: afterClientReset))
-        case .recoverOrDiscardUnsyncedChanges(let beforeClientReset, let afterClientReset):
-            config = self.__configuration(withPartitionValue: ObjectiveCSupport.convert(object: partitionValue),
-                                          clientResetMode: .recoverOrDiscardUnsyncedChanges,
-                                          notifyBeforeReset: ObjectiveCSupport.convert(object: beforeClientReset),
-                                          notifyAfterReset: ObjectiveCSupport.convert(object: afterClientReset))
-        }
-        let syncConfig = config.syncConfiguration!
-        syncConfig.cancelAsyncOpenOnNonFatalErrors = cancelAsyncOpenOnNonFatalErrors
-        config.syncConfiguration = syncConfig
+        let config = __configuration(withPartitionValue: ObjectiveCSupport.convert(object: partitionValue))
+        setSyncFields(config, clientResetMode: clientResetMode, cancelAsyncOpenOnNonFatalErrors: cancelAsyncOpenOnNonFatalErrors)
         return ObjectiveCSupport.convert(object: config)
     }
 
@@ -859,11 +879,15 @@ public extension SyncSession {
     typealias ProgressNotificationToken = RLMProgressNotificationToken
 
     /**
-     A struct encapsulating progress information, as well as useful helper methods.
+     A struct encapsulating progress information.
      */
     struct Progress: Sendable {
+        private let _transferredBytes: Int // NEXT-MAJOR remove storage fields and deprecated props
+        private let _transferrableBytes: Int // NEXT-MAJOR remove storage fields and deprecated props
+
         /// The number of bytes that have been transferred.
-        public let transferredBytes: Int
+        @available(*, deprecated, message: "Use progressEstimate")
+        public var transferredBytes: Int { return _transferredBytes }
 
         /**
          The total number of transferrable bytes (bytes that have been transferred,
@@ -874,27 +898,36 @@ public extension SyncSession {
          If the notification block is tracking uploads, this number represents the size of the
          changesets representing the local changes on this client.
          */
-        public let transferrableBytes: Int
+        @available(*, deprecated, message: "Use progressEstimate")
+        public var transferrableBytes: Int { return _transferrableBytes }
+
+        /**
+         A value between 0.0 and 1.0 representing the estimated transfer progress. This value is precise for
+         uploads, but will be based on historical data and certain heuristics applied by the server for downloads.
+         
+         Whenever the progress reporting mode is `forCurrentlyOutstandingWork`, that value
+         will monotonically increase until it reaches 1.0. If the progress mode is `reportIndefinitely`, the
+         value may either increase or decrease as new data needs to be transferred.
+         */
+        public let progressEstimate: Double
 
         /// The fraction of bytes transferred out of all transferrable bytes. If this value is 1,
         /// no bytes are waiting to be transferred (either all bytes have already been transferred,
         /// or there are no bytes to be transferred in the first place).
+        @available(*, deprecated, message: "Use progressEstimate", renamed: "progressEstimate")
         public var fractionTransferred: Double {
-            if transferrableBytes == 0 {
-                return 1
-            }
-            let percentage = Double(transferredBytes) / Double(transferrableBytes)
-            return percentage > 1 ? 1 : percentage
+            return progressEstimate
         }
 
-        /// Whether all pending bytes have already been transferred.
+        /// Whether all pending data has already been transferred.
         public var isTransferComplete: Bool {
-            return transferredBytes >= transferrableBytes
+            return progressEstimate == 1.0
         }
 
-        internal init(transferred: UInt, transferrable: UInt) {
-            transferredBytes = Int(transferred)
-            transferrableBytes = Int(transferrable)
+        internal init(transferred: UInt, transferrable: UInt, estimate: Double) {
+            _transferredBytes = Int(transferred)
+            _transferrableBytes = Int(transferrable)
+            progressEstimate = estimate
         }
     }
 
@@ -931,11 +964,11 @@ public extension SyncSession {
     func addProgressNotification(for direction: ProgressDirection,
                                  mode: ProgressMode,
                                  block: @Sendable @escaping (Progress) -> Void) -> ProgressNotificationToken? {
-        return __addProgressNotification(for: (direction == .upload ? .upload : .download),
-                                         mode: (mode == .reportIndefinitely
-                                            ? .reportIndefinitely
-                                            : .forCurrentlyOutstandingWork)) { transferred, transferrable in
-                                                block(Progress(transferred: transferred, transferrable: transferrable))
+        return __addSyncProgressNotification(for: (direction == .upload ? .upload : .download),
+                                             mode: (mode == .reportIndefinitely
+                                                    ? .reportIndefinitely
+                                                    : .forCurrentlyOutstandingWork)) { progress in
+            block(Progress(transferred: progress.transferredBytes, transferrable: progress.transferrableBytes, estimate: progress.progressEstimate))
         }
     }
 
@@ -953,13 +986,9 @@ public extension SyncSession {
               block: @Sendable @escaping (Error?) -> Void) {
         switch direction {
         case .upload:
-            __waitForUploadCompletion(on: queue) { error in
-                block(error)
-            }
+            __waitForUploadCompletion(on: queue, callback: block)
         case .download:
-            __waitForDownloadCompletion(on: queue) { error in
-                block(error)
-            }
+            __waitForDownloadCompletion(on: queue, callback: block)
         }
     }
 
@@ -1086,7 +1115,7 @@ public class UserPublisher: Publisher {
 }
 
 @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
-extension User: ObservableObject {
+extension User {
     /// A publisher that emits Void each time the user changes.
     ///
     /// Despite the name, this actually emits *after* the user has changed.
@@ -1095,14 +1124,15 @@ extension User: ObservableObject {
     }
 }
 
+@available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
+extension User: @retroactive ObservableObject {}
+
 public extension User {
-    // NEXT-MAJOR: This function returns the incorrect type. It should be Document
-    // rather than `[AnyHashable: Any]`
     /// Refresh a user's custom data. This will, in effect, refresh the user's auth session.
     /// @completion A completion that eventually return `Result.success(Dictionary)` with user's data or `Result.failure(Error)`.
     @preconcurrency
     func refreshCustomData(_ completion: @escaping @Sendable (Result<[AnyHashable: Any], Error>) -> Void) {
-        self.refreshCustomData { customData, error in
+        self.__refreshCustomData { customData, error in
             if let customData = customData {
                 completion(.success(customData))
             } else {
@@ -1110,18 +1140,45 @@ public extension User {
             }
         }
     }
+
+    /// Refresh a user's custom data. This will, in effect, refresh the user's auth session.
+    @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
+    @discardableResult
+    func refreshCustomData() async throws -> Document {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            self.__refreshCustomData { _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+        return customData
+    }
 }
 
 @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
 extension FunctionCallable {
+    /// :nodoc:
+    @available(*, deprecated, message: "Specify args separately without wrapping them in an array")
+    public func dynamicallyCall(withArguments args: [[AnyBSON]]) async throws -> AnyBSON {
+        let objcArgs = args.first!.map(ObjectiveCSupport.convertBson)
+        let ret = try await user.__callFunctionNamed(name, arguments: objcArgs)
+        if let bson = ObjectiveCSupport.convertBson(object: ret) {
+            return bson
+        }
+        throw Realm.Error.callFailed
+    }
+
     /// The implementation of @dynamicMemberLookup that allows  for `async await` callable return.
     ///
-    ///     guard case let .int32(sum) = try await user.functions.sum([1, 2, 3, 4, 5]) else {
+    ///     guard case let .int32(sum) = try await user.functions.sum(1, 2, 3, 4, 5) else {
     ///        return
     ///     }
     ///
-    public func dynamicallyCall(withArguments args: [[AnyBSON]]) async throws -> AnyBSON {
-        let objcArgs = args.first!.map(ObjectiveCSupport.convertBson)
+    public func dynamicallyCall(withArguments args: [AnyBSON]) async throws -> AnyBSON {
+        let objcArgs = args.map(ObjectiveCSupport.convertBson)
         let ret = try await user.__callFunctionNamed(name, arguments: objcArgs)
         if let bson = ObjectiveCSupport.convertBson(object: ret) {
             return bson
@@ -1150,27 +1207,8 @@ extension User {
      */
     public func flexibleSyncConfiguration(clientResetMode: ClientResetMode = .recoverUnsyncedChanges(),
                                           cancelAsyncOpenOnNonFatalErrors: Bool = false) -> Realm.Configuration {
-        var config: RLMRealmConfiguration
-        switch clientResetMode {
-        case .manual(let block):
-            config = __flexibleSyncConfiguration(with: .manual, manualClientResetHandler: block)
-        case .discardUnsyncedChanges(let beforeBlock, let afterBlock),
-                .discardLocal(let beforeBlock, let afterBlock):
-            config = __flexibleSyncConfiguration(with: .discardUnsyncedChanges,
-                                                 notifyBeforeReset: ObjectiveCSupport.convert(object: beforeBlock),
-                                                 notifyAfterReset: ObjectiveCSupport.convert(object: afterBlock))
-        case .recoverUnsyncedChanges(let beforeBlock, let afterBlock):
-            config = __flexibleSyncConfiguration(with: .recoverUnsyncedChanges,
-                                                 notifyBeforeReset: ObjectiveCSupport.convert(object: beforeBlock),
-                                                 notifyAfterReset: ObjectiveCSupport.convert(object: afterBlock))
-        case .recoverOrDiscardUnsyncedChanges(let beforeBlock, let afterBlock):
-            config = __flexibleSyncConfiguration(with: .recoverOrDiscardUnsyncedChanges,
-                                                 notifyBeforeReset: ObjectiveCSupport.convert(object: beforeBlock),
-                                                 notifyAfterReset: ObjectiveCSupport.convert(object: afterBlock))
-        }
-        let syncConfig = config.syncConfiguration!
-        syncConfig.cancelAsyncOpenOnNonFatalErrors = cancelAsyncOpenOnNonFatalErrors
-        config.syncConfiguration = syncConfig
+        let config = __flexibleSyncConfiguration()
+        setSyncFields(config, clientResetMode: clientResetMode, cancelAsyncOpenOnNonFatalErrors: cancelAsyncOpenOnNonFatalErrors)
         return ObjectiveCSupport.convert(object: config)
     }
 
@@ -1211,35 +1249,9 @@ extension User {
                                           cancelAsyncOpenOnNonFatalErrors: Bool = false,
                                           initialSubscriptions: @escaping @Sendable (SyncSubscriptionSet) -> Void,
                                           rerunOnOpen: Bool = false) -> Realm.Configuration {
-        var config: RLMRealmConfiguration
-        switch clientResetMode {
-        case .manual(let block):
-            config = self.__flexibleSyncConfiguration(initialSubscriptions: ObjectiveCSupport.convert(block: initialSubscriptions),
-                                                      rerunOnOpen: rerunOnOpen,
-                                                      clientResetMode: .manual,
-                                                      manualClientResetHandler: block)
-        case .discardUnsyncedChanges(let beforeBlock, let afterBlock), .discardLocal(let beforeBlock, let afterBlock):
-            config = self.__flexibleSyncConfiguration(initialSubscriptions: ObjectiveCSupport.convert(block: initialSubscriptions),
-                                                      rerunOnOpen: rerunOnOpen,
-                                                      clientResetMode: .discardUnsyncedChanges,
-                                                      notifyBeforeReset: ObjectiveCSupport.convert(object: beforeBlock),
-                                                      notifyAfterReset: ObjectiveCSupport.convert(object: afterBlock))
-        case .recoverUnsyncedChanges(let beforeBlock, let afterBlock):
-            config = self.__flexibleSyncConfiguration(initialSubscriptions: ObjectiveCSupport.convert(block: initialSubscriptions),
-                                                      rerunOnOpen: rerunOnOpen,
-                                                      clientResetMode: .recoverUnsyncedChanges,
-                                                      notifyBeforeReset: ObjectiveCSupport.convert(object: beforeBlock),
-                                                      notifyAfterReset: ObjectiveCSupport.convert(object: afterBlock))
-        case .recoverOrDiscardUnsyncedChanges(let beforeBlock, let afterBlock):
-            config = self.__flexibleSyncConfiguration(initialSubscriptions: ObjectiveCSupport.convert(block: initialSubscriptions),
-                                                      rerunOnOpen: rerunOnOpen,
-                                                      clientResetMode: .recoverOrDiscardUnsyncedChanges,
-                                                      notifyBeforeReset: ObjectiveCSupport.convert(object: beforeBlock),
-                                                      notifyAfterReset: ObjectiveCSupport.convert(object: afterBlock))
-        }
-        let syncConfig = config.syncConfiguration!
-        syncConfig.cancelAsyncOpenOnNonFatalErrors = cancelAsyncOpenOnNonFatalErrors
-        config.syncConfiguration = syncConfig
+        let config = __flexibleSyncConfiguration(initialSubscriptions: ObjectiveCSupport.convert(block: initialSubscriptions),
+                                                 rerunOnOpen: rerunOnOpen)
+        setSyncFields(config, clientResetMode: clientResetMode, cancelAsyncOpenOnNonFatalErrors: cancelAsyncOpenOnNonFatalErrors)
         return ObjectiveCSupport.convert(object: config)
     }
 }

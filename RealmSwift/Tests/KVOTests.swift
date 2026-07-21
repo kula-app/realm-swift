@@ -19,15 +19,9 @@
 import XCTest
 import RealmSwift
 
-var pkCounter = 0
-func nextPrimaryKey() -> Int {
-    pkCounter += 1
-    return pkCounter
-}
-
 @available(*, deprecated) // Silence deprecation warnings for RealmOptional
 class SwiftKVOObject: Object {
-    @objc dynamic var pk = nextPrimaryKey() // primary key for equality
+    @objc dynamic var pk = ObjectId.generate() // primary key for equality
     @objc dynamic var ignored: Int = 0
 
     @objc dynamic var boolCol: Bool = false
@@ -53,6 +47,7 @@ class SwiftKVOObject: Object {
     let otherFloatCol = RealmProperty<Float?>()
     let otherDoubleCol = RealmProperty<Double?>()
     let otherBoolCol = RealmProperty<Bool?>()
+    let otherAnyCol = RealmProperty<AnyRealmValue>()
     @objc dynamic var optStringCol: String?
     @objc dynamic var optBinaryCol: Data?
     @objc dynamic var optDateCol: Date?
@@ -71,6 +66,7 @@ class SwiftKVOObject: Object {
     let arrayDate = List<Date>()
     let arrayDecimal = List<Decimal128>()
     let arrayObjectId = List<ObjectId>()
+    let arrayAny = List<AnyRealmValue>()
 
     let arrayOptBool = List<Bool?>()
     let arrayOptInt8 = List<Int8?>()
@@ -97,6 +93,7 @@ class SwiftKVOObject: Object {
     let setDate = MutableSet<Date>()
     let setDecimal = MutableSet<Decimal128>()
     let setObjectId = MutableSet<ObjectId>()
+    let setAny = MutableSet<AnyRealmValue>()
 
     let setOptBool = MutableSet<Bool?>()
     let setOptInt8 = MutableSet<Int8?>()
@@ -123,6 +120,7 @@ class SwiftKVOObject: Object {
     let mapDate = Map<String, Date>()
     let mapDecimal = Map<String, Decimal128>()
     let mapObjectId = Map<String, ObjectId>()
+    let mapAny = Map<String, AnyRealmValue>()
 
     let mapOptBool = Map<String, Bool?>()
     let mapOptInt8 = Map<String, Int8?>()
@@ -190,13 +188,18 @@ class KVOTests: TestCase {
         changeDictionary = nil
     }
 
-    func observeChange<T: Equatable>(_ obj: SwiftKVOObject, _ keyPath: KeyPath<SwiftKVOObject, T>, _ old: T, _ new: T,
-                                     fileName: StaticString = #file, lineNumber: UInt = #line, _ block: () -> Void) {
+    func observeChange<T: Equatable>(
+        _ obj: SwiftKVOObject, _ keyPath: KeyPath<SwiftKVOObject, T>, _ old: T, _ new: T,
+        fileName: StaticString = #filePath, lineNumber: UInt = #line, _ block: () -> Void
+    ) {
+        // observe()'s callback is marked as Sendable, but we'll only ever call it from the same thread
         let kvoOptions: NSKeyValueObservingOptions = [.old, .new]
-        var gotNotification = false
+        nonisolated(unsafe) var gotNotification = false
+        nonisolated(unsafe) let nonisolatedOld = old
+        nonisolated(unsafe) let nonisolatedNew = new
         let observation = obj.observe(keyPath, options: kvoOptions) { _, change in
-            XCTAssertEqual(change.oldValue, old, file: (fileName), line: lineNumber)
-            XCTAssertEqual(change.newValue, new, file: (fileName), line: lineNumber)
+            XCTAssertEqual(change.oldValue, nonisolatedOld, file: fileName, line: lineNumber)
+            XCTAssertEqual(change.newValue, nonisolatedNew, file: fileName, line: lineNumber)
             gotNotification = true
         }
 
@@ -206,20 +209,24 @@ class KVOTests: TestCase {
         XCTAssertTrue(gotNotification, file: (fileName), line: lineNumber)
     }
 
-    func observeChange<T: Equatable>(_ obj: SwiftKVOObject, _ keyPath: KeyPath<SwiftKVOObject, T?>, _ old: T?, _ new: T?,
-                                     fileName: StaticString = #file, lineNumber: UInt = #line, _ block: () -> Void) {
+    func observeChange<T: Equatable>(
+        _ obj: SwiftKVOObject, _ keyPath: KeyPath<SwiftKVOObject, T?>, _ old: T?, _ new: T?,
+        fileName: StaticString = #filePath, lineNumber: UInt = #line, _ block: () -> Void
+    ) {
         let kvoOptions: NSKeyValueObservingOptions = [.old, .new]
-        var gotNotification = false
+        nonisolated(unsafe) var gotNotification = false
+        nonisolated(unsafe) let nonisolatedOld = old
+        nonisolated(unsafe) let nonisolatedNew = new
         let observation = obj.observe(keyPath, options: kvoOptions) { _, change in
             if let oldValue = change.oldValue {
-                XCTAssertEqual(oldValue, old, file: (fileName), line: lineNumber)
+                XCTAssertEqual(oldValue, nonisolatedOld, file: (fileName), line: lineNumber)
             } else {
-                XCTAssertNil(old, file: (fileName), line: lineNumber)
+                XCTAssertNil(nonisolatedOld, file: (fileName), line: lineNumber)
             }
             if let newValue = change.newValue {
-                XCTAssertEqual(newValue, new, file: (fileName), line: lineNumber)
+                XCTAssertEqual(newValue, nonisolatedNew, file: (fileName), line: lineNumber)
             } else {
-                XCTAssertNil(new, file: (fileName), line: lineNumber)
+                XCTAssertNil(nonisolatedNew, file: (fileName), line: lineNumber)
             }
             gotNotification = true
         }
@@ -454,6 +461,21 @@ class KVOTests: TestCase {
         observeChange(obs4, "mapBool.invalidated", false, true) {
             self.realm.delete(obj4)
         }
+    }
+
+    func testCollectionInMixedKVO() {
+        let (obj, obs) = getObject(SwiftKVOObject())
+
+        observeSetChange(obs, "otherAnyCol") { obj.otherAnyCol.value = AnyRealmValue.fromDictionary([
+            "key1": .int(1234)]) }
+        observeSetChange(obs, "otherAnyCol") { obj.otherAnyCol.value.dictionaryValue?["key1"] = .string("hello") }
+        observeSetChange(obs, "otherAnyCol") { obj.otherAnyCol.value.dictionaryValue?["key1"] = nil }
+
+        observeSetChange(obs, "otherAnyCol") { obj.otherAnyCol.value = AnyRealmValue.fromArray([.bool(true)]) }
+        observeSetChange(obs, "otherAnyCol") { obj.otherAnyCol.value.listValue?[0] = .float(123.456) }
+        observeSetChange(obs, "otherAnyCol") { obj.otherAnyCol.value.listValue?.append(.bool(true)) }
+        observeSetChange(obs, "otherAnyCol") { obj.otherAnyCol.value.listValue?.insert(.date(Date()), at: 1) }
+        observeSetChange(obs, "otherAnyCol") { obj.otherAnyCol.value.listValue?.remove(at: 0) }
     }
 
     func testTypedObservation() {

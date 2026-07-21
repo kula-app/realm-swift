@@ -1,10 +1,16 @@
-// swift-tools-version:5.7
+// swift-tools-version:5.10
 
 import PackageDescription
 import Foundation
 
-let coreVersion = Version("14.6.0")
-let cocoaVersion = Version("10.49.2")
+let coreVersion = Version("14.14.0")
+let cocoaVersion = Version("10.54.6")
+
+#if compiler(>=6)
+let swiftVersion = [SwiftVersion.version("6")]
+#else
+let swiftVersion = [SwiftVersion.v5]
+#endif
 
 let cxxSettings: [CXXSetting] = [
     .headerSearchPath("."),
@@ -140,17 +146,19 @@ let package = Package(
     name: "Realm",
     platforms: [
         .macOS(.v10_13),
-        .iOS(.v11),
-        .tvOS(.v11),
+        .iOS(.v12),
+        .tvOS(.v12),
         .watchOS(.v4)
     ],
     products: [
         .library(
             name: "Realm",
+            type: .dynamic,
             targets: ["Realm"]),
         .library(
             name: "RealmSwift",
-            targets: ["Realm", "RealmSwift"]),
+            type: .dynamic,
+            targets: ["RealmSwift"]),
     ],
     dependencies: [
         .package(url: "https://github.com/kula-app/realm-core.git", branch: "kula-patch-3")
@@ -179,7 +187,6 @@ let package = Package(
                 "RealmSwift.podspec",
                 "SUPPORT.md",
                 "build.sh",
-                "ci_scripts/ci_post_clone.sh",
                 "contrib",
                 "dependencies.list",
                 "docs",
@@ -390,5 +397,6 @@ let package = Package(
             ]
         )
     ],
+    swiftLanguageVersions: swiftVersion,
     cxxLanguageStandard: .cxx20
 )

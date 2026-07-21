@@ -8,15 +8,13 @@ Pod::Spec.new do |s|
   s.description             = <<-DESC
                               The Realm Database, for Objective-C. (If you want to use Realm from Swift, see the “RealmSwift” pod.)
 
-                              Realm is a fast, easy-to-use replacement for Core Data & SQLite. Use it with Atlas Device Sync for realtime, automatic data sync. Works on iOS, macOS, tvOS & watchOS. Learn more and get help at https://www.mongodb.com/docs/realm/sdk/swift/.
+                              Realm is a fast, easy-to-use replacement for Core Data & SQLite. Use it with Atlas Device Sync for realtime, automatic data sync. Works on iOS, macOS, tvOS & watchOS. Learn more and get help at https://www.mongodb.com/docs/atlas/device-sdks/sdk/swift/.
                               DESC
   s.homepage                = "https://realm.io"
   s.source                  = { :git => 'https://github.com/realm/realm-swift.git', :tag => "v#{s.version}" }
   s.author                  = { 'Realm' => 'realm-help@mongodb.com' }
   s.library                 = 'c++', 'z', 'compression'
   s.requires_arc            = true
-  s.social_media_url        = 'https://twitter.com/realm'
-  s.documentation_url       = "https://docs.mongodb.com/realm/sdk/swift"
   s.license                 = { :type => 'Apache 2.0', :file => 'LICENSE' }
 
   public_header_files       = 'include/Realm.h',
@@ -130,31 +128,32 @@ Pod::Spec.new do |s|
                                 'OTHER_CPLUSPLUSFLAGS' => '-isystem "${PODS_ROOT}/Realm/include/core" -fvisibility-inlines-hidden',
                                 'USER_HEADER_SEARCH_PATHS' => '"${PODS_ROOT}/Realm/include" "${PODS_ROOT}/Realm/include/Realm"',
 
-                                'IPHONEOS_DEPLOYMENT_TARGET_1400' => '11.0',
                                 'IPHONEOS_DEPLOYMENT_TARGET_1500' => '12.0',
+                                'IPHONEOS_DEPLOYMENT_TARGET_1600' => '12.0',
+                                'IPHONEOS_DEPLOYMENT_TARGET_2600' => '12.0',
                                 'IPHONEOS_DEPLOYMENT_TARGET' => '$(IPHONEOS_DEPLOYMENT_TARGET_$(XCODE_VERSION_MAJOR))',
-                                'MACOSX_DEPLOYMENT_TARGET_1400' => '10.13',
-                                'MACOSX_DEPLOYMENT_TARGET_1500' => '10.14',
+                                'MACOSX_DEPLOYMENT_TARGET_1500' => '10.13',
+                                'MACOSX_DEPLOYMENT_TARGET_1600' => '10.13',
+                                'MACOSX_DEPLOYMENT_TARGET_2600' => '10.13',
                                 'MACOSX_DEPLOYMENT_TARGET' => '$(MACOSX_DEPLOYMENT_TARGET_$(XCODE_VERSION_MAJOR))',
-                                'WATCHOS_DEPLOYMENT_TARGET_1400' => '4.0',
-                                'WATCHOS_DEPLOYMENT_TARGET_1500' => '5.0',
+                                'WATCHOS_DEPLOYMENT_TARGET_1500' => '4.0',
+                                'WATCHOS_DEPLOYMENT_TARGET_1600' => '4.0',
+                                'WATCHOS_DEPLOYMENT_TARGET_2600' => '4.0',
                                 'WATCHOS_DEPLOYMENT_TARGET' => '$(WATCHOS_DEPLOYMENT_TARGET_$(XCODE_VERSION_MAJOR))',
-                                'TVOS_DEPLOYMENT_TARGET_1400' => '11.0',
                                 'TVOS_DEPLOYMENT_TARGET_1500' => '12.0',
+                                'TVOS_DEPLOYMENT_TARGET_1600' => '12.0',
+                                'TVOS_DEPLOYMENT_TARGET_2600' => '12.0',
                                 'TVOS_DEPLOYMENT_TARGET' => '$(TVOS_DEPLOYMENT_TARGET_$(XCODE_VERSION_MAJOR))',
 
-                                'REALM_LD_CLASSIC_1400' => '',
-                                'REALM_LD_CLASSIC_1500' => '-Wl,-ld_classic',
-                                'REALM_LD_CLASSIC' => '$(REALM_LD_CLASSIC_$(XCODE_VERSION_MAJOR))',
-                                'OTHER_LDFLAGS' => '$(REALM_LD_CLASSIC) "-Wl,-unexported_symbols_list,${PODS_ROOT}/Realm/Configuration/Realm/PrivateSymbols.txt"',
+                                'OTHER_LDFLAGS' => '"-Wl,-unexported_symbols_list,${PODS_ROOT}/Realm/Configuration/Realm/PrivateSymbols.txt"',
                               }
   s.preserve_paths          = %w(include scripts Configuration/Realm/PrivateSymbols.txt)
   s.resource_bundles        = {'realm_objc_privacy' => ['Realm/PrivacyInfo.xcprivacy']}
 
-  s.ios.deployment_target   = '11.0'
+  s.ios.deployment_target   = '12.0'
   s.osx.deployment_target   = '10.13'
   s.watchos.deployment_target = '4.0'
-  s.tvos.deployment_target = '11.0'
+  s.tvos.deployment_target = '12.0'
 
   s.vendored_frameworks  = 'core/realm-monorepo.xcframework'
 

@@ -21,7 +21,7 @@
 import Combine
 import Realm
 import Realm.Private
-import RealmSwift
+@_spi(RealmSwiftExperimental) import RealmSwift
 import XCTest
 
 #if canImport(RealmTestSupport)
@@ -32,13 +32,13 @@ import RealmSwiftTestSupport
 #endif
 
 func assertAppError(_ error: AppError, _ code: AppError.Code, _ message: String,
-                    line: UInt = #line, file: StaticString = #file) {
+                    line: UInt = #line, file: StaticString = #filePath) {
     XCTAssertEqual(error.code, code, file: file, line: line)
     XCTAssertEqual(error.localizedDescription, message, file: file, line: line)
 }
 
 func assertSyncError(_ error: Error, _ code: SyncError.Code, _ message: String,
-                     line: UInt = #line, file: StaticString = #file) {
+                     line: UInt = #line, file: StaticString = #filePath) {
     let e = error as NSError
     XCTAssertEqual(e.domain, RLMSyncErrorDomain, file: file, line: line)
     XCTAssertEqual(e.code, code.rawValue, file: file, line: line)
@@ -62,10 +62,26 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         ]
     }
 
+    func testUpdateBaseUrl() {
+        let app = App(id: appId)
+        XCTAssertEqual(app.baseURL, "https://services.cloud.mongodb.com")
+
+        app.updateBaseUrl(to: "http://localhost:9090").await(self)
+        XCTAssertEqual(app.baseURL, "http://localhost:9090")
+
+        app.updateBaseUrl(to: "http://127.0.0.1:9090").await(self)
+        XCTAssertEqual(app.baseURL, "http://127.0.0.1:9090")
+
+        app.updateBaseUrl(to: nil).awaitFailure(self)
+        XCTAssertEqual(app.baseURL, "http://127.0.0.1:9090")
+    }
+
+    @MainActor
     func testBasicSwiftSync() throws {
         XCTAssert(try openRealm().isEmpty, "Freshly synced Realm was not empty...")
     }
 
+    @MainActor
     func testSwiftAddObjects() throws {
         let realm = try openRealm()
         checkCount(expected: 0, realm, SwiftPerson.self)
@@ -87,7 +103,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         XCTAssertEqual(obj.intCol, 1)
         XCTAssertEqual(obj.doubleCol, 1.1)
         XCTAssertEqual(obj.stringCol, "string")
-        XCTAssertEqual(obj.binaryCol, "string".data(using: String.Encoding.utf8)!)
+        XCTAssertEqual(obj.binaryCol, Data("string".utf8))
         XCTAssertEqual(obj.decimalCol, Decimal128(1))
         XCTAssertEqual(obj.dateCol, Date(timeIntervalSince1970: -1))
         XCTAssertEqual(obj.longCol, Int64(1))
@@ -96,6 +112,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         XCTAssertEqual(obj.objectCol!.firstName, "George")
     }
 
+    @MainActor
     func testSwiftRountripForDistinctPrimaryKey() throws {
         let realm = try openRealm()
         checkCount(expected: 0, realm, SwiftPerson.self) // ObjectId
@@ -139,6 +156,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         XCTAssertEqual(swiftIntPrimaryKeyObject.intCol, 30)
     }
 
+    @MainActor
     func testSwiftAddObjectsWithNilPartitionValue() throws {
         // Use a fresh app as other tests touch the nil partition on the shared app
         let app = app(id: try RealmServer.shared.createApp(types: [SwiftPerson.self]))
@@ -164,6 +182,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         checkCount(expected: 3, realm, SwiftPerson.self)
     }
 
+    @MainActor
     func testSwiftDeleteObjects() throws {
         let realm = try openRealm()
         try realm.write {
@@ -184,6 +203,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         checkCount(expected: 0, realm, SwiftTypesSyncObject.self)
     }
 
+    @MainActor
     func testMultiplePartitions() throws {
         let partitionValueA = name
         let partitionValueB = "\(name)bar"
@@ -240,6 +260,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         XCTAssertEqual(realmB.objects(SwiftPerson.self).filter("firstName == %@", "Ringo").count, 0)
     }
 
+    @MainActor
     func testConnectionState() throws {
         let realm = try openRealm(wait: false)
         let session = realm.syncSession!
@@ -267,11 +288,10 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
 
     // MARK: - Progress notifiers
     @MainActor
+    @available(*, deprecated)
     func testStreamingDownloadNotifier() throws {
         let realm = try openRealm(wait: false)
         let session = try XCTUnwrap(realm.syncSession)
-        var ex = expectation(description: "first download")
-        var minimumDownloadSize = 1000000
         var callCount = 0
         var progress: SyncSession.Progress?
         let token = session.addProgressNotification(for: .download, mode: .reportIndefinitely) { p in
@@ -279,85 +299,75 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
                 // Verify that progress doesn't decrease, but sometimes it won't
                 // have increased since the last call
                 if let progress = progress {
-                    XCTAssertGreaterThanOrEqual(p.transferredBytes, progress.transferredBytes)
-                    XCTAssertGreaterThanOrEqual(p.transferrableBytes, progress.transferrableBytes)
-                    if p.transferredBytes == progress.transferredBytes && p.transferrableBytes == progress.transferrableBytes {
-                        return
-                    }
+                    XCTAssertGreaterThanOrEqual(p.progressEstimate, progress.progressEstimate)
                 }
                 progress = p
                 callCount += 1
-                if p.transferredBytes > minimumDownloadSize && p.isTransferComplete {
-                    ex.fulfill()
-                }
             }
         }
         XCTAssertNotNil(token)
 
         try populateRealm()
-        waitForExpectations(timeout: 60.0, handler: nil)
+        waitForDownloads(for: realm)
 
         XCTAssertGreaterThanOrEqual(callCount, 1)
         let p1 = try XCTUnwrap(progress)
         XCTAssertEqual(p1.transferredBytes, p1.transferrableBytes)
+        XCTAssertEqual(p1.progressEstimate, 1.0)
+        XCTAssertTrue(p1.isTransferComplete)
         let initialCallCount = callCount
-        minimumDownloadSize = p1.transferredBytes + 1000000
 
         // Run a second time to upload more data and verify that the callback continues to be called
-        ex = expectation(description: "second download")
         try populateRealm()
-        waitForExpectations(timeout: 60.0, handler: nil)
-        XCTAssertGreaterThanOrEqual(callCount, initialCallCount)
+        waitForDownloads(for: realm)
+
+        XCTAssertGreaterThan(callCount, initialCallCount)
         let p2 = try XCTUnwrap(progress)
         XCTAssertEqual(p2.transferredBytes, p2.transferrableBytes)
+        XCTAssertEqual(p2.progressEstimate, 1.0)
+        XCTAssertTrue(p2.isTransferComplete)
 
         token!.invalidate()
     }
 
     @MainActor
+    @available(*, deprecated)
     func testStreamingUploadNotifier() throws {
         let realm = try openRealm(wait: false)
         let session = try XCTUnwrap(realm.syncSession)
 
-        var ex = expectation(description: "initial upload")
-        var progress: SyncSession.Progress?
+        let progress = Locked<SyncSession.Progress?>(nil)
 
         let token = session.addProgressNotification(for: .upload, mode: .reportIndefinitely) { p in
-            DispatchQueue.main.async { @MainActor in
-                if let progress = progress {
-                    XCTAssertGreaterThanOrEqual(p.transferredBytes, progress.transferredBytes)
-                    XCTAssertGreaterThanOrEqual(p.transferrableBytes, progress.transferrableBytes)
-                    // The sync client sometimes sends spurious notifications
-                    // where nothing has changed, and we should just ignore those
-                    if p.transferredBytes == progress.transferredBytes && p.transferrableBytes == progress.transferrableBytes {
-                        return
-                    }
+            progress.withLock { progress in
+                if let progress {
+                    XCTAssertGreaterThanOrEqual(p.progressEstimate, progress.progressEstimate)
                 }
                 progress = p
-                if p.transferredBytes > 100 && p.isTransferComplete {
-                    ex.fulfill()
-                }
             }
         }
         XCTAssertNotNil(token)
-        waitForExpectations(timeout: 10.0, handler: nil)
+        waitForUploads(for: realm)
 
-        for i in 0..<5 {
-            ex = expectation(description: "write transaction upload \(i)")
+        for _ in 0..<5 {
+            progress.value = nil
             try realm.write {
                 for _ in 0..<SwiftSyncTestCase.bigObjectCount {
                     realm.add(SwiftHugeSyncObject.create())
                 }
             }
-            waitForExpectations(timeout: 10.0, handler: nil)
+
+            waitForUploads(for: realm)
         }
         token!.invalidate()
 
-        let p = try XCTUnwrap(progress)
+        let p = try XCTUnwrap(progress.value)
         XCTAssertEqual(p.transferredBytes, p.transferrableBytes)
+        XCTAssertEqual(p.progressEstimate, 1.0)
+        XCTAssertTrue(p.isTransferComplete)
     }
 
-    func testStreamingNotifierInvalidate() throws {
+    @MainActor func testStreamingNotifierInvalidate() throws {
         let realm = try openRealm()
         let session = try XCTUnwrap(realm.syncSession)
         let downloadCount = Locked(0)
@@ -408,6 +418,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
 
     // MARK: - Download Realm
 
+    @MainActor
     func testDownloadRealm() throws {
         try populateRealm()
 
@@ -436,6 +447,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         XCTAssertFalse(RLMHasCachedRealmForPath(pathOnDisk))
     }
 
+    @MainActor
     func testDownloadRealmToCustomPath() throws {
         try populateRealm()
 
@@ -466,6 +478,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         XCTAssertFalse(RLMHasCachedRealmForPath(pathOnDisk))
     }
 
+    @MainActor
     func testCancelDownloadRealm() throws {
         try populateRealm()
 
@@ -477,7 +490,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         let ex = expectation(description: "async open")
         ex.expectedFulfillmentCount = 2
         let config = try configuration()
-        let completion = { (result: Result<Realm, Error>) -> Void in
+        let completion = { (result: Result<Realm, Error>) in
             guard case .failure = result else {
                 XCTFail("No error on cancelled async open")
                 return ex.fulfill()
@@ -490,7 +503,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         waitForExpectations(timeout: 10.0, handler: nil)
     }
 
-    func testAsyncOpenProgress() throws {
+    @MainActor func testAsyncOpenProgress() throws {
         try populateRealm()
 
         let ex1 = expectation(description: "async open")
@@ -510,6 +523,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         waitForExpectations(timeout: 10.0, handler: nil)
     }
 
+    @MainActor
     func config(baseURL: String, transport: RLMNetworkTransport, syncTimeouts: SyncTimeoutOptions? = nil) throws -> Realm.Configuration {
         let appId = try RealmServer.shared.createApp(types: [])
         let appConfig = AppConfiguration(baseURL: baseURL, transport: transport, syncTimeouts: syncTimeouts)
@@ -521,6 +535,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         return config
     }
 
+    @MainActor
     func testAsyncOpenTimeout() throws {
         let proxy = TimeoutProxyServer(port: 5678, targetPort: 9090)
         try proxy.start()
@@ -568,7 +583,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         proxy.stop()
     }
 
-    class LocationOverrideTransport: RLMNetworkTransport {
+    class LocationOverrideTransport: RLMNetworkTransport, Sendable {
         let hostname: String
         let wsHostname: String
         init(hostname: String = "http://localhost:9090", wsHostname: String = "ws://invalid.com:9090") {
@@ -588,6 +603,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         }
     }
 
+    @MainActor
     func testDNSError() throws {
         let config = try config(baseURL: "http://localhost:9090", transport: LocationOverrideTransport(wsHostname: "ws://invalid.com:9090"))
         Realm.asyncOpen(configuration: config).awaitFailure(self, timeout: 40) { error in
@@ -595,6 +611,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         }
     }
 
+    @MainActor
     func testTLSError() throws {
         let config = try config(baseURL: "http://localhost:9090", transport: LocationOverrideTransport(wsHostname: "wss://localhost:9090"))
         Realm.asyncOpen(configuration: config).awaitFailure(self) { error in
@@ -644,7 +661,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
 
     // MARK: - Authentication
 
-    func testInvalidCredentials() throws {
+    @MainActor func testInvalidCredentials() throws {
         let email = "testInvalidCredentialsEmail"
         let credentials = basicCredentials()
         let user = try logInUser(for: credentials)
@@ -673,7 +690,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
 
     // MARK: - User-specific functionality
 
-    func testUserExpirationCallback() throws {
+    @MainActor func testUserExpirationCallback() throws {
         let user = createUser()
 
         // Set a callback on the user
@@ -890,7 +907,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         let credentials = Credentials.emailPassword(email: email, password: password)
         let syncUser = app.login(credentials: credentials).await(self)
 
-        let bson = syncUser.functions.sum([1, 2, 3, 4, 5]).await(self)
+        let bson = syncUser.functions.sum(1, 2, 3, 4, 5).await(self)
         guard case let .int32(sum) = bson else {
             XCTFail("unexpected bson type in sum: \(bson)")
             return
@@ -918,7 +935,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         let credentials = Credentials.emailPassword(email: email, password: password)
         app.emailPasswordAuth.registerUser(email: email, password: password).await(self)
         let user = app.login(credentials: credentials).await(self)
-        user.functions.updateUserData([["favourite_colour": "green", "apples": 10]]).await(self)
+        user.functions.updateUserData(["favourite_colour": "green", "apples": 10]).await(self)
 
         let customData = user.refreshCustomData().await(self)
         XCTAssertEqual(customData["apples"] as! Int, 10)
@@ -979,7 +996,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         checkCount(expected: SwiftSyncTestCase.bigObjectCount + 1, destinationRealm, SwiftHugeSyncObject.self)
     }
 
-    func testSeedFilePathOpenSyncToSync() throws {
+    @MainActor func testSeedFilePathOpenSyncToSync() throws {
         // user1 creates and writeCopies a realm to be opened by another user
         var config = try configuration()
         config.objectTypes = [SwiftHugeSyncObject.self]
@@ -1014,7 +1031,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         checkCount(expected: SwiftSyncTestCase.bigObjectCount + 1, destinationRealm, SwiftHugeSyncObject.self)
     }
 
-    func testSeedFilePathOpenSyncToLocal() throws {
+    @MainActor func testSeedFilePathOpenSyncToLocal() throws {
         let seedURL = RLMTestRealmURL().deletingLastPathComponent().appendingPathComponent("seed.realm")
         let user1 = try logInUser(for: basicCredentials())
         var syncConfig = user1.configuration(partitionValue: name)
@@ -1052,7 +1069,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
 
     // MARK: Write Copy For Configuration
 
-    func testWriteCopySyncedRealm() throws {
+    @MainActor func testWriteCopySyncedRealm() throws {
         // user1 creates and writeCopies a realm to be opened by another user
         var config = try configuration()
         config.objectTypes = [SwiftHugeSyncObject.self]
@@ -1103,7 +1120,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         XCTAssertEqual(obj3.data, obj4?.data)
     }
 
-    func testWriteCopyLocalRealmToSync() throws {
+    @MainActor func testWriteCopyLocalRealmToSync() throws {
         var localConfig = Realm.Configuration()
         localConfig.objectTypes = [SwiftPerson.self]
         localConfig.fileURL = realmURLForFile("test.realm")
@@ -1132,7 +1149,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         XCTAssertEqual(syncedResults.where { $0.firstName == "Jane" }.count, 1)
     }
 
-    func testWriteCopySynedRealmToLocal() throws {
+    @MainActor func testWriteCopySynedRealmToLocal() throws {
         var syncConfig = try configuration()
         syncConfig.objectTypes = [SwiftPerson.self]
         let syncedRealm = try Realm(configuration: syncConfig)
@@ -1163,7 +1180,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         XCTAssertEqual(results.where { $0.firstName == "Jane" }.count, 1)
     }
 
-    func testWriteCopyLocalRealmForSyncWithExistingData() throws {
+    @MainActor func testWriteCopyLocalRealmForSyncWithExistingData() throws {
         var initialSyncConfig = try configuration()
         initialSyncConfig.objectTypes = [SwiftPerson.self]
 
@@ -1214,7 +1231,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         XCTAssertTrue(syncedRealm.objects(SwiftPerson.self).count == 4)
     }
 
-    func testWriteCopyFailBeforeSynced() throws {
+    @MainActor func testWriteCopyFailBeforeSynced() throws {
         var user1Config = try configuration()
         user1Config.objectTypes = [SwiftPerson.self]
         let user1Realm = try Realm(configuration: user1Config)
@@ -1256,7 +1273,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
         }
     }
 
-    func testVerifyDocumentsWithCustomColumnNames() throws {
+    @MainActor func testVerifyDocumentsWithCustomColumnNames() throws {
         let collection = try setupMongoCollection(for: SwiftCustomColumnObject.self)
         let objectId = ObjectId.generate()
         let linkedObjectId = ObjectId.generate()
@@ -1293,7 +1310,7 @@ class SwiftObjectServerTests: SwiftSyncTestCase {
     /// The purpose of this test is to confirm that when an Object is set on a mixed Column and an old
     /// version of an app does not have that Realm Object / Schema we can still access that object via
     /// `AnyRealmValue.dynamicSchema`.
-    func testMissingSchema() throws {
+    @MainActor func testMissingSchema() throws {
         try autoreleasepool {
             // Imagine this is v2 of an app with 3 classes
             var config = createUser().configuration(partitionValue: name)

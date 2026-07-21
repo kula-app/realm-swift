@@ -30,6 +30,7 @@
 #import <realm/geospatial.hpp>
 #import <realm/object-store/object_store.hpp>
 #import <realm/object-store/results.hpp>
+#import <realm/path.hpp>
 #import <realm/query_engine.hpp>
 #import <realm/query_expression.hpp>
 #import <realm/util/cf_ptr.hpp>
@@ -37,13 +38,9 @@
 
 using namespace realm;
 
-NSString * const RLMPropertiesComparisonTypeMismatchException = @"RLMPropertiesComparisonTypeMismatchException";
-NSString * const RLMUnsupportedTypesFoundInPropertyComparisonException = @"RLMUnsupportedTypesFoundInPropertyComparisonException";
-
-NSString * const RLMPropertiesComparisonTypeMismatchReason = @"Property type mismatch between %@ and %@";
-NSString * const RLMUnsupportedTypesFoundInPropertyComparisonReason = @"Comparison between %@ and %@";
-
 namespace {
+NSString * const RLMPropertiesComparisonTypeMismatchException = @"RLMPropertiesComparisonTypeMismatchException";
+NSString * const RLMPropertiesComparisonTypeMismatchReason = @"Property type mismatch between %@ and %@";
 
 // small helper to create the many exceptions thrown when parsing predicates
 [[gnu::cold]] [[noreturn]]
@@ -484,7 +481,6 @@ public:
 
     void apply_predicate(NSPredicate *predicate, RLMObjectSchema *objectSchema);
 
-
     void apply_collection_operator_expression(KeyPath&& kp, id value, NSComparisonPredicate *pred);
     void apply_value_expression(KeyPath&& kp, id value, NSComparisonPredicate *pred);
     void apply_column_expression(KeyPath&& left, KeyPath&& right, NSComparisonPredicate *predicate);
@@ -566,10 +562,9 @@ public:
                                              const CollectionOperation& collectionOperation, R&& rhs,
                                              NSComparisonPredicateOptions comparisionOptions);
 
-
     CollectionOperation collection_operation_from_key_path(KeyPath&& kp);
     ColumnReference column_reference_from_key_path(KeyPath&& kp, bool isAggregate);
-
+    NSString* get_path_elements(std::vector<PathElement> &paths, NSExpression *expression);
 
 private:
     Query& m_query;
@@ -690,6 +685,28 @@ Query make_diacritic_insensitive_constraint(NSPredicateOperatorType operatorType
 template <typename> struct AlwaysFalse : std::false_type {};
 
 template <typename C, typename T>
+Query make_lexicographical_constraint(NSPredicateOperatorType operatorType,
+                                      bool caseSensitive,
+                                      C& column, T const& value) {
+    if (!caseSensitive) {
+        throwException(@"Invalid predicate",
+                       @"Lexicographical comparisons must be case-sensitive");
+    }
+    switch (operatorType) {
+        case NSLessThanPredicateOperatorType:
+            return column < value;
+        case NSLessThanOrEqualToPredicateOperatorType:
+            return column <= value;
+        case NSGreaterThanPredicateOperatorType:
+            return column > value;
+        case NSGreaterThanOrEqualToPredicateOperatorType:
+            return column >= value;
+        default:
+            REALM_COMPILER_HINT_UNREACHABLE();
+    }
+}
+
+template <typename C, typename T>
 Query make_diacritic_sensitive_constraint(NSPredicateOperatorType operatorType,
                                           bool caseSensitive, C& column, T const& value)
 {
@@ -706,6 +723,11 @@ Query make_diacritic_sensitive_constraint(NSPredicateOperatorType operatorType,
             return column.not_equal(value, caseSensitive);
         case NSLikePredicateOperatorType:
             return column.like(value, caseSensitive);
+        case NSLessThanPredicateOperatorType:
+        case NSLessThanOrEqualToPredicateOperatorType:
+        case NSGreaterThanPredicateOperatorType:
+        case NSGreaterThanOrEqualToPredicateOperatorType:
+            return make_lexicographical_constraint(operatorType, caseSensitive, column, value);
         default: {
             if constexpr (is_any_v<C, Columns<String>, Columns<Lst<String>>, Columns<Set<String>>, ColumnDictionaryKeys>) {
                 unsupportedOperator(RLMPropertyTypeString, operatorType);
@@ -778,16 +800,14 @@ template <typename C, typename T>
 void QueryBuilder::add_diacritic_sensitive_string_constraint(NSPredicateOperatorType operatorType,
                                                              NSComparisonPredicateOptions predicateOptions,
                                                              C&& column, T&& value) {
-    if constexpr (is_any_v<C, Columns<Dictionary>>) {
-        // This nesting isnt pretty but without it the compiler will complain about `T` having no known
-        // conversion from Columns<StringData> to Mixed. This is due to the fact that all values on a
-        // dictionary column are boxed in Mixed.
-        if constexpr (is_any_v<T, Mixed, BinaryData, StringData>) {
-            do_add_diacritic_sensitive_string_constraint(operatorType, predicateOptions, std::forward<C>(column), value);
-        }
+
+    if constexpr (is_any_v<C, Columns<Dictionary>> && is_any_v<T, Columns<StringData>, Columns<BinaryData>>) {
+        // Core only implements these for Columns<Mixed> due to Dictionary being Mixed internall
+        throwException(@"Unsupported predicate",
+                       @"String comparisons on a Dictionary and another property are only implemented for AnyRealmValue properties.");
     }
     else {
-        do_add_diacritic_sensitive_string_constraint(operatorType, predicateOptions, std::forward<C>(column), value);
+        do_add_diacritic_sensitive_string_constraint(operatorType, predicateOptions, std::forward<C>(column), std::forward<T>(value));
     }
 }
 
@@ -796,7 +816,7 @@ void QueryBuilder::add_string_constraint(NSPredicateOperatorType operatorType,
                                          NSComparisonPredicateOptions predicateOptions,
                                          C&& column, T&& value) {
     if (!(predicateOptions & NSDiacriticInsensitivePredicateOption)) {
-        add_diacritic_sensitive_string_constraint(operatorType, predicateOptions, std::forward<C>(column), std::move(value));
+        add_diacritic_sensitive_string_constraint(operatorType, predicateOptions, std::forward<C>(column), std::forward<T>(value));
         return;
     }
 
@@ -1052,7 +1072,7 @@ void convert_null(T&& value, Fn&& fn) {
         fn(null());
     }
     else {
-        fn(value);
+        fn(std::forward<T>(value));
     }
 }
 
@@ -1328,7 +1348,7 @@ KeyPath key_path_from_string(RLMSchema *schema, RLMObjectSchema *objectSchema, N
 
 ColumnReference QueryBuilder::column_reference_from_key_path(KeyPath&& kp, bool isAggregate)
 {
-    if (isAggregate && !kp.containsToManyRelationship) {
+    if (isAggregate && !kp.containsToManyRelationship && kp.property.type != RLMPropertyTypeAny) {
         throwException(@"Invalid predicate",
                        @"Aggregate operations can only be used on key paths that include an collection property");
     } else if (!isAggregate && kp.containsToManyRelationship) {
@@ -1432,15 +1452,15 @@ void QueryBuilder::add_collection_operation_constraint(NSPredicateOperatorType o
                                                        CollectionOperation const& collectionOperation, R&& rhs,
                                                        NSComparisonPredicateOptions options)
 {
-    convert_null(rhs, [&](auto&& rhs) {
+    convert_null(std::forward<R>(rhs), [&]<typename T>(T&& rhs) {
         if (collectionOperation.link_column().is_link()) {
-            add_collection_operation_constraint<Operation, true, false>(operatorType, collectionOperation, std::move(rhs), options);
+            add_collection_operation_constraint<Operation, true, false>(operatorType, collectionOperation, std::forward<T>(rhs), options);
         }
         else if (collectionOperation.column().property().dictionary) {
-            add_collection_operation_constraint<Operation, false, true>(operatorType, collectionOperation, std::move(rhs), options);
+            add_collection_operation_constraint<Operation, false, true>(operatorType, collectionOperation, std::forward<T>(rhs), options);
         }
         else {
-            add_collection_operation_constraint<Operation, false, false>(operatorType, collectionOperation, std::move(rhs), options);
+            add_collection_operation_constraint<Operation, false, false>(operatorType, collectionOperation, std::forward<T>(rhs), options);
         }
     });
 }
@@ -1470,8 +1490,8 @@ void QueryBuilder::add_collection_operation_constraint(NSPredicateOperatorType o
             auto& column = collectionOperation.link_column();
             RLMPropertyType type = column.type();
             auto rhsValue = value_of_type<Int>(rhs);
-            auto continuation = [&](auto t) {
-                add_numeric_constraint(type, operatorType, column.resolve<std::decay_t<decltype(*t)>>().size(), rhsValue);
+            auto continuation = [&]<typename T>(T *) {
+                add_numeric_constraint(type, operatorType, column.resolve<T>().size(), rhsValue);
             };
 
             switch (type) {
@@ -1503,16 +1523,16 @@ void QueryBuilder::add_collection_operation_constraint(NSPredicateOperatorType o
             }
         }
         case CollectionOperation::Minimum:
-            add_collection_operation_constraint<CollectionOperation::Minimum>(operatorType, collectionOperation, std::move(rhs), comparisonOptions);
+            add_collection_operation_constraint<CollectionOperation::Minimum>(operatorType, collectionOperation, std::forward<R>(rhs), comparisonOptions);
             break;
         case CollectionOperation::Maximum:
-            add_collection_operation_constraint<CollectionOperation::Maximum>(operatorType, collectionOperation, std::move(rhs), comparisonOptions);
+            add_collection_operation_constraint<CollectionOperation::Maximum>(operatorType, collectionOperation, std::forward<R>(rhs), comparisonOptions);
             break;
         case CollectionOperation::Sum:
-            add_collection_operation_constraint<CollectionOperation::Sum>(operatorType, collectionOperation, std::move(rhs), comparisonOptions);
+            add_collection_operation_constraint<CollectionOperation::Sum>(operatorType, collectionOperation, std::forward<R>(rhs), comparisonOptions);
             break;
         case CollectionOperation::Average:
-            add_collection_operation_constraint<CollectionOperation::Average>(operatorType, collectionOperation, std::move(rhs), comparisonOptions);
+            add_collection_operation_constraint<CollectionOperation::Average>(operatorType, collectionOperation, std::forward<R>(rhs), comparisonOptions);
             break;
         case CollectionOperation::AllKeys: {
             // BETWEEN and IN are not supported by @allKeys as the parsing for collection
@@ -1684,23 +1704,22 @@ NSExpression *simplify_self_value_for_key_path_function_expression(NSExpression 
 void QueryBuilder::apply_map_expression(RLMObjectSchema *objectSchema, NSExpression *functionExpression,
                                         NSComparisonPredicateOptions options, NSPredicateOperatorType operatorType,
                                         NSExpression *right) {
-    NSString *keyPath;
-    NSString *mapKey;
-    if (functionExpression.operand.expressionType == NSKeyPathExpressionType) {
-        NSExpression *mapItems = [functionExpression.arguments firstObject];
-        NSExpression *linkCol = [[functionExpression.operand arguments] firstObject];
-        NSExpression *mapCol = [mapItems.arguments firstObject];
-        mapKey = [mapItems.arguments[1] constantValue];
-        keyPath = [NSString stringWithFormat:@"%@.%@", linkCol.keyPath, mapCol.keyPath];
-    } else {
-        keyPath = [functionExpression.arguments.firstObject keyPath];
-        mapKey = [functionExpression.arguments[1] constantValue];
-    }
+    std::vector<PathElement> pathElements;
+    NSString *keyPath = get_path_elements(pathElements, functionExpression);
 
     ColumnReference collectionColumn = column_reference_from_key_path(key_path_from_string(m_schema, objectSchema, keyPath), true);
-    RLMPrecondition(collectionColumn.property().dictionary, @"Invalid predicate",
-                    @"Invalid keypath '%@': only dictionaries support subscript predicates.", functionExpression);
-    add_mixed_constraint(operatorType, options, std::move(collectionColumn.resolve<Dictionary>().key(mapKey.UTF8String)), right.constantValue);
+
+    if (collectionColumn.property().type == RLMPropertyTypeAny && !collectionColumn.property().dictionary) {
+        add_mixed_constraint(operatorType, options, std::move(collectionColumn.resolve<realm::Mixed>().path(pathElements)), right.constantValue);
+    } else {
+        RLMPrecondition(collectionColumn.property().dictionary, @"Invalid predicate",
+                        @"Invalid keypath '%@': only dictionaries and realm `Any` support subscript predicates.", functionExpression);
+        RLMPrecondition(pathElements.size() == 1, @"Invalid subscript size",
+                        @"Invalid subscript size '%@': nested dictionaries queries are only allowed in mixed properties.", functionExpression);
+        RLMPrecondition(pathElements[0].is_key(), @"Invalid subscript type",
+                        @"Invalid subscript type '%@'; only string keys are allowed as subscripts in dictionary queries.", functionExpression);
+        add_mixed_constraint(operatorType, options, std::move(collectionColumn.resolve<Dictionary>().key(pathElements[0].get_key())), right.constantValue);
+    }
 }
 
 void QueryBuilder::apply_function_expression(RLMObjectSchema *objectSchema, NSExpression *functionExpression,
@@ -1849,6 +1868,47 @@ void QueryBuilder::apply_predicate(NSPredicate *predicate, RLMObjectSchema *obje
         throwException(@"Invalid predicate",
                        @"Only support compound, comparison, and constant predicates");
     }
+}
+
+// This function returns the nested subscripts from a NSPredicate with the following format `anyCol[0]['key'][#any]`
+// and its respective keypath (including any linked keypath)
+// This will iterate each argument of the NSExpression and its nested NSExpressions, takes the constant subscript
+// and creates a PathElement to be used in the query. If we use `#any` as a wildcard this will show in the parser 
+// predicate as NSKeyPathExpressionType.
+NSString* QueryBuilder::get_path_elements(std::vector<PathElement> &paths, NSExpression *expression) {
+    NSString *keyPath = @"";
+    for (NSUInteger i = 0; i < expression.arguments.count; i++) {
+        NSString *nestedKeyPath = @"";
+        if (expression.arguments[i].expressionType == NSFunctionExpressionType) {
+            nestedKeyPath = get_path_elements(paths, expression.arguments[i]);
+        } else if (expression.arguments[i].expressionType == NSConstantValueExpressionType) {
+            id value = [expression.arguments[i] constantValue];
+            if ([value isKindOfClass:[NSNumber class]]) {
+                paths.push_back(PathElement{[(NSNumber *)value intValue]});
+            } else if ([value isKindOfClass:[NSString class]]) {
+                NSString *key = (NSString *)value;
+                paths.push_back(PathElement{key.UTF8String});
+            } else {
+                throwException(@"Invalid subscript type",
+                               @"Invalid subscript type '%@': Only `Strings` or index are allowed subscripts", expression);
+            }
+        } else if (expression.arguments[i].expressionType == NSKeyPathExpressionType) {
+            auto keyPath = [(id)expression.arguments[i] predicateFormat];
+            if ([keyPath isEqual:@"#any"]) {
+                paths.emplace_back();
+            } else {
+                nestedKeyPath = keyPath;
+            }
+        } else {
+            throwException(@"Invalid expression type",
+                           @"Invalid expression type '%@': Subscripts queries don't allow any other expression types", expression);
+        }
+        if ([nestedKeyPath length] > 0) {
+            keyPath = ([keyPath length] > 0) ? [NSString stringWithFormat:@"%@.%@", keyPath, nestedKeyPath] : nestedKeyPath;
+        }
+    }
+
+    return keyPath;
 }
 } // namespace
 

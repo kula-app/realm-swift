@@ -59,10 +59,10 @@ class QueryTests: TestCase {
     override func setUp() {
         realm = inMemoryRealm("QueryTests")
         try! realm.write {
-            let objModernCollectionsOfEnums = ModernCollectionsOfEnums()
             let objCustomPersistableCollections = CustomPersistableCollections()
-            let objModernAllTypesObject = ModernAllTypesObject()
+            let objModernCollectionsOfEnums = ModernCollectionsOfEnums()
             let objAllCustomPersistableTypes = AllCustomPersistableTypes()
+            let objModernAllTypesObject = ModernAllTypesObject()
 
             objModernAllTypesObject.boolCol = false
             objModernAllTypesObject.intCol = 3
@@ -420,10 +420,10 @@ class QueryTests: TestCase {
             objCustomPersistableCollections.mapOptUuid["foo"] = UUIDWrapper(persistedValue: UUID(uuidString: "33041937-05b2-464a-98ad-3910cbe0d09e")!)
             objCustomPersistableCollections.mapOptUuid["bar"] = UUIDWrapper(persistedValue: UUID(uuidString: "33041937-05b2-464a-98ad-3910cbe0d09f")!)
 
-            realm.add(objModernCollectionsOfEnums)
             realm.add(objAllCustomPersistableTypes)
-            realm.add(objModernAllTypesObject)
+            realm.add(objModernCollectionsOfEnums)
             realm.add(objCustomPersistableCollections)
+            realm.add(objModernAllTypesObject)
         }
     }
 
@@ -435,21 +435,21 @@ class QueryTests: TestCase {
         realm.beginWrite()
         realm.deleteAll()
 
-        let parentLinkToModernCollectionsOfEnums = realm.create(LinkToModernCollectionsOfEnums.self)
-        let childrenModernCollectionsOfEnums = [ModernCollectionsOfEnums(), ModernCollectionsOfEnums(), ModernCollectionsOfEnums()]
-        parentLinkToModernCollectionsOfEnums.list.append(objectsIn: childrenModernCollectionsOfEnums)
-
         let parentLinkToCustomPersistableCollections = realm.create(LinkToCustomPersistableCollections.self)
         let childrenCustomPersistableCollections = [CustomPersistableCollections(), CustomPersistableCollections(), CustomPersistableCollections()]
         parentLinkToCustomPersistableCollections.list.append(objectsIn: childrenCustomPersistableCollections)
 
-        let parentLinkToModernAllTypesObject = realm.create(LinkToModernAllTypesObject.self)
-        let childrenModernAllTypesObject = [ModernAllTypesObject(), ModernAllTypesObject(), ModernAllTypesObject()]
-        parentLinkToModernAllTypesObject.list.append(objectsIn: childrenModernAllTypesObject)
+        let parentLinkToModernCollectionsOfEnums = realm.create(LinkToModernCollectionsOfEnums.self)
+        let childrenModernCollectionsOfEnums = [ModernCollectionsOfEnums(), ModernCollectionsOfEnums(), ModernCollectionsOfEnums()]
+        parentLinkToModernCollectionsOfEnums.list.append(objectsIn: childrenModernCollectionsOfEnums)
 
         let parentLinkToAllCustomPersistableTypes = realm.create(LinkToAllCustomPersistableTypes.self)
         let childrenAllCustomPersistableTypes = [AllCustomPersistableTypes(), AllCustomPersistableTypes(), AllCustomPersistableTypes()]
         parentLinkToAllCustomPersistableTypes.list.append(objectsIn: childrenAllCustomPersistableTypes)
+
+        let parentLinkToModernAllTypesObject = realm.create(LinkToModernAllTypesObject.self)
+        let childrenModernAllTypesObject = [ModernAllTypesObject(), ModernAllTypesObject(), ModernAllTypesObject()]
+        parentLinkToModernAllTypesObject.list.append(objectsIn: childrenModernAllTypesObject)
 
 
         initForKeypathCollectionAggregates(childrenModernAllTypesObject, \.intCol)
@@ -749,9 +749,10 @@ class QueryTests: TestCase {
     // MARK: - Assertion Helpers
 
     private func assertCount<T: Object>(_ expectedCount: Int,
+                                        line: UInt = #line,
                                         _ query: ((Query<T>) -> Query<Bool>)) {
         let results = realm.objects(T.self).where(query)
-        XCTAssertEqual(results.count, expectedCount)
+        XCTAssertEqual(results.count, expectedCount, line: line)
     }
 
     private func assertPredicate<T: _RealmSchemaDiscoverable>(
@@ -774,8 +775,9 @@ class QueryTests: TestCase {
     private func assertQuery<T: Object>(_ type: T.Type,
                              _ predicate: String, _ value: Any,
                              count expectedCount: Int,
+                             line: UInt = #line,
                              _ query: ((Query<T>) -> Query<Bool>)) {
-        assertCount(expectedCount, query)
+        assertCount(expectedCount, line: line, query)
         assertPredicate(predicate, [value], query)
     }
 
@@ -983,6 +985,332 @@ class QueryTests: TestCase {
         setAnyRealmValueCol(with: .uuid(UUID(uuidString: "33041937-05b2-464a-98ad-3910cbe0d09e")!), object: object)
         assertQuery("(anyCol == %@)", AnyRealmValue.uuid(UUID(uuidString: "33041937-05b2-464a-98ad-3910cbe0d09e")!), count: 1) {
             $0.anyCol == .uuid(UUID(uuidString: "33041937-05b2-464a-98ad-3910cbe0d09e")!)
+        }
+    }
+
+    func testEqualAnyRealmList() {
+        let circleObject = self.circleObject
+        let object = objects()[0]
+        let list = List<AnyRealmValue>()
+        list.removeAll()
+        list.append(.none)
+        setAnyRealmValueCol(with: .list(list), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.list(list), count: 1) {
+            let list = List<AnyRealmValue>()
+            list.append(.none)
+            return $0.anyCol == .list(list)
+        }
+        list.removeAll()
+        list.append(.int(123))
+        setAnyRealmValueCol(with: .list(list), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.list(list), count: 1) {
+            let list = List<AnyRealmValue>()
+            list.append(.int(123))
+            return $0.anyCol == .list(list)
+        }
+        list.removeAll()
+        list.append(.bool(true))
+        setAnyRealmValueCol(with: .list(list), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.list(list), count: 1) {
+            let list = List<AnyRealmValue>()
+            list.append(.bool(true))
+            return $0.anyCol == .list(list)
+        }
+        list.removeAll()
+        list.append(.float(123.456))
+        setAnyRealmValueCol(with: .list(list), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.list(list), count: 1) {
+            let list = List<AnyRealmValue>()
+            list.append(.float(123.456))
+            return $0.anyCol == .list(list)
+        }
+        list.removeAll()
+        list.append(.double(123.456))
+        setAnyRealmValueCol(with: .list(list), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.list(list), count: 1) {
+            let list = List<AnyRealmValue>()
+            list.append(.double(123.456))
+            return $0.anyCol == .list(list)
+        }
+        list.removeAll()
+        list.append(.string("FooBar"))
+        setAnyRealmValueCol(with: .list(list), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.list(list), count: 1) {
+            let list = List<AnyRealmValue>()
+            list.append(.string("FooBar"))
+            return $0.anyCol == .list(list)
+        }
+        list.removeAll()
+        list.append(.data(Data(count: 64)))
+        setAnyRealmValueCol(with: .list(list), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.list(list), count: 1) {
+            let list = List<AnyRealmValue>()
+            list.append(.data(Data(count: 64)))
+            return $0.anyCol == .list(list)
+        }
+        list.removeAll()
+        list.append(.date(Date(timeIntervalSince1970: 1000000)))
+        setAnyRealmValueCol(with: .list(list), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.list(list), count: 1) {
+            let list = List<AnyRealmValue>()
+            list.append(.date(Date(timeIntervalSince1970: 1000000)))
+            return $0.anyCol == .list(list)
+        }
+        list.removeAll()
+        list.append(.object(circleObject))
+        setAnyRealmValueCol(with: .list(list), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.list(list), count: 1) {
+            let list = List<AnyRealmValue>()
+            list.append(.object(circleObject))
+            return $0.anyCol == .list(list)
+        }
+        list.removeAll()
+        list.append(.objectId(ObjectId("61184062c1d8f096a3695046")))
+        setAnyRealmValueCol(with: .list(list), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.list(list), count: 1) {
+            let list = List<AnyRealmValue>()
+            list.append(.objectId(ObjectId("61184062c1d8f096a3695046")))
+            return $0.anyCol == .list(list)
+        }
+        list.removeAll()
+        list.append(.decimal128(123.456))
+        setAnyRealmValueCol(with: .list(list), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.list(list), count: 1) {
+            let list = List<AnyRealmValue>()
+            list.append(.decimal128(123.456))
+            return $0.anyCol == .list(list)
+        }
+        list.removeAll()
+        list.append(.uuid(UUID(uuidString: "33041937-05b2-464a-98ad-3910cbe0d09e")!))
+        setAnyRealmValueCol(with: .list(list), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.list(list), count: 1) {
+            let list = List<AnyRealmValue>()
+            list.append(.uuid(UUID(uuidString: "33041937-05b2-464a-98ad-3910cbe0d09e")!))
+            return $0.anyCol == .list(list)
+        }
+    }
+
+    func testEqualAnyRealmDictionary() {
+        let circleObject = self.circleObject
+        let object = objects()[0]
+        let dictionary = Map<String, AnyRealmValue>()
+        dictionary.removeAll()
+        dictionary["key"] = AnyRealmValue.none
+        setAnyRealmValueCol(with: .dictionary(dictionary), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.dictionary(dictionary), count: 1) {
+            let dictionary = Map<String, AnyRealmValue>()
+            dictionary["key"] = AnyRealmValue.none
+            return $0.anyCol == .dictionary(dictionary)
+        }
+        dictionary.removeAll()
+        dictionary["key"] = AnyRealmValue.int(123)
+        setAnyRealmValueCol(with: .dictionary(dictionary), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.dictionary(dictionary), count: 1) {
+            let dictionary = Map<String, AnyRealmValue>()
+            dictionary["key"] = AnyRealmValue.int(123)
+            return $0.anyCol == .dictionary(dictionary)
+        }
+        dictionary.removeAll()
+        dictionary["key"] = AnyRealmValue.bool(true)
+        setAnyRealmValueCol(with: .dictionary(dictionary), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.dictionary(dictionary), count: 1) {
+            let dictionary = Map<String, AnyRealmValue>()
+            dictionary["key"] = AnyRealmValue.bool(true)
+            return $0.anyCol == .dictionary(dictionary)
+        }
+        dictionary.removeAll()
+        dictionary["key"] = AnyRealmValue.float(123.456)
+        setAnyRealmValueCol(with: .dictionary(dictionary), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.dictionary(dictionary), count: 1) {
+            let dictionary = Map<String, AnyRealmValue>()
+            dictionary["key"] = AnyRealmValue.float(123.456)
+            return $0.anyCol == .dictionary(dictionary)
+        }
+        dictionary.removeAll()
+        dictionary["key"] = AnyRealmValue.double(123.456)
+        setAnyRealmValueCol(with: .dictionary(dictionary), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.dictionary(dictionary), count: 1) {
+            let dictionary = Map<String, AnyRealmValue>()
+            dictionary["key"] = AnyRealmValue.double(123.456)
+            return $0.anyCol == .dictionary(dictionary)
+        }
+        dictionary.removeAll()
+        dictionary["key"] = AnyRealmValue.string("FooBar")
+        setAnyRealmValueCol(with: .dictionary(dictionary), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.dictionary(dictionary), count: 1) {
+            let dictionary = Map<String, AnyRealmValue>()
+            dictionary["key"] = AnyRealmValue.string("FooBar")
+            return $0.anyCol == .dictionary(dictionary)
+        }
+        dictionary.removeAll()
+        dictionary["key"] = AnyRealmValue.data(Data(count: 64))
+        setAnyRealmValueCol(with: .dictionary(dictionary), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.dictionary(dictionary), count: 1) {
+            let dictionary = Map<String, AnyRealmValue>()
+            dictionary["key"] = AnyRealmValue.data(Data(count: 64))
+            return $0.anyCol == .dictionary(dictionary)
+        }
+        dictionary.removeAll()
+        dictionary["key"] = AnyRealmValue.date(Date(timeIntervalSince1970: 1000000))
+        setAnyRealmValueCol(with: .dictionary(dictionary), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.dictionary(dictionary), count: 1) {
+            let dictionary = Map<String, AnyRealmValue>()
+            dictionary["key"] = AnyRealmValue.date(Date(timeIntervalSince1970: 1000000))
+            return $0.anyCol == .dictionary(dictionary)
+        }
+        dictionary.removeAll()
+        dictionary["key"] = AnyRealmValue.object(circleObject)
+        setAnyRealmValueCol(with: .dictionary(dictionary), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.dictionary(dictionary), count: 1) {
+            let dictionary = Map<String, AnyRealmValue>()
+            dictionary["key"] = AnyRealmValue.object(circleObject)
+            return $0.anyCol == .dictionary(dictionary)
+        }
+        dictionary.removeAll()
+        dictionary["key"] = AnyRealmValue.objectId(ObjectId("61184062c1d8f096a3695046"))
+        setAnyRealmValueCol(with: .dictionary(dictionary), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.dictionary(dictionary), count: 1) {
+            let dictionary = Map<String, AnyRealmValue>()
+            dictionary["key"] = AnyRealmValue.objectId(ObjectId("61184062c1d8f096a3695046"))
+            return $0.anyCol == .dictionary(dictionary)
+        }
+        dictionary.removeAll()
+        dictionary["key"] = AnyRealmValue.decimal128(123.456)
+        setAnyRealmValueCol(with: .dictionary(dictionary), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.dictionary(dictionary), count: 1) {
+            let dictionary = Map<String, AnyRealmValue>()
+            dictionary["key"] = AnyRealmValue.decimal128(123.456)
+            return $0.anyCol == .dictionary(dictionary)
+        }
+        dictionary.removeAll()
+        dictionary["key"] = AnyRealmValue.uuid(UUID(uuidString: "33041937-05b2-464a-98ad-3910cbe0d09e")!)
+        setAnyRealmValueCol(with: .dictionary(dictionary), object: object)
+        assertQuery("(anyCol == %@)", AnyRealmValue.dictionary(dictionary), count: 1) {
+            let dictionary = Map<String, AnyRealmValue>()
+            dictionary["key"] = AnyRealmValue.uuid(UUID(uuidString: "33041937-05b2-464a-98ad-3910cbe0d09e")!)
+            return $0.anyCol == .dictionary(dictionary)
+        }
+    }
+
+    func testNestedAnyRealmList() {
+        let object = objects()[0]
+        let subArray2: AnyRealmValue = AnyRealmValue.fromArray([ .string("john"), .bool(false) ])
+        let subArray3: AnyRealmValue = AnyRealmValue.fromArray([ subArray2, .double(76.54) ])
+        let subArray4: AnyRealmValue = AnyRealmValue.fromArray([ subArray3, .int(99)])
+        let array: Array<AnyRealmValue> = [
+            subArray4, .float(20.34)
+        ]
+
+        setAnyRealmValueCol(with: AnyRealmValue.fromArray(array), object: object)
+        assertQuery("(anyCol[%@] == %@)", values: [1, AnyRealmValue.float(20.34)], count: 1) {
+            $0.anyCol[1] == .float(20.34)
+        }
+
+        assertQuery("(anyCol[%K] == %@)", values: ["#any", AnyRealmValue.float(20.34)], count: 1) {
+            $0.anyCol.any == .float(20.34)
+        }
+
+        assertQuery("(anyCol[%@][%@] == %@)", values: [0, 1, AnyRealmValue.int(99)], count: 1) {
+            $0.anyCol[0][1] == .int(99)
+        }
+
+        assertQuery("(anyCol[%@][%@][%@] == %@)", values: [0, 0, 1, AnyRealmValue.double(76.54)], count: 1) {
+            $0.anyCol[0][0][1] == .double(76.54)
+        }
+
+        assertQuery("(anyCol[%@][%@][%K] == %@)", values: [0, 0, "#any", AnyRealmValue.double(76.54)], count: 1) {
+            $0.anyCol[0][0].any == .double(76.54)
+        }
+
+        assertQuery("(anyCol[%@][%@][%@][%@] == %@)", values: [0, 0, 0, 0, AnyRealmValue.string("john")], count: 1) {
+            $0.anyCol[0][0][0][0] == .string("john")
+        }
+
+        assertQuery("(anyCol[%@][%@][%@][%@] == %@)", values: [0, 0, 0, 1, AnyRealmValue.bool(false)], count: 1) {
+            $0.anyCol[0][0][0][1] == .bool(false)
+        }
+
+        assertQuery("(anyCol[%@][%@][%@][%K] == %@)", values: [0, 0, 0, "#any", AnyRealmValue.string("john")], count: 1) {
+            $0.anyCol[0][0][0].any == .string("john")
+        }
+
+        assertQuery("(anyCol[%@][%@][%@][%K] == %@)", values: [0, 0, 0, "#any", AnyRealmValue.bool(false)], count: 1) {
+            $0.anyCol[0][0][0].any == .bool(false)
+        }
+
+        assertQuery("(anyCol[%@][%@] >= %@)", values: [0, 1, AnyRealmValue.int(99)], count: 1) {
+            $0.anyCol[0][1] >= .int(99)
+        }
+
+        assertQuery("(anyCol[%@][%@] <= %@)", values: [0, 1, AnyRealmValue.int(99)], count: 1) {
+            $0.anyCol[0][1] <= .int(99)
+        }
+
+        assertQuery("(anyCol[%@][%@] != %@)", values: [0, 1, AnyRealmValue.int(99)], count: 0) {
+            $0.anyCol[0][1] != .int(99)
+        }
+
+        assertQuery("(anyCol[%@] == %@)", values: ["#any", AnyRealmValue.float(20.34)], count: 0) {
+            $0.anyCol["#any"] == .float(20.34)
+        }
+    }
+
+    func testNestedAnyRealmDictionary() {
+        let object = objects()[0]
+        let subDict2: AnyRealmValue = AnyRealmValue.fromDictionary(["key6": .string("john"), "key7": .bool(false)])
+        let subDict3: AnyRealmValue = AnyRealmValue.fromDictionary(["key4": subDict2, "key5": .double(76.54)])
+        let subDict4: AnyRealmValue = AnyRealmValue.fromDictionary(["key2": subDict3, "key3": .int(99)])
+        let dict: Dictionary<String, AnyRealmValue> = [
+            "key0": subDict4, "key1": .float(20.34)
+        ]
+
+        setAnyRealmValueCol(with: AnyRealmValue.fromDictionary(dict), object: object)
+        assertQuery("(anyCol[%@] == %@)", values: ["key1", AnyRealmValue.float(20.34)], count: 1) {
+            $0.anyCol["key1"] == .float(20.34)
+        }
+
+        assertQuery("(anyCol[%K] == %@)", values: ["#any", AnyRealmValue.float(20.34)], count: 1) {
+            $0.anyCol.any == .float(20.34)
+        }
+
+        assertQuery("(anyCol[%@][%@] == %@)", values: ["key0", "key3", AnyRealmValue.int(99)], count: 1) {
+            $0.anyCol["key0"]["key3"] == .int(99)
+        }
+
+        assertQuery("(anyCol[%@][%K] == %@)", values: ["key0", "#any", AnyRealmValue.int(99)], count: 1) {
+            $0.anyCol["key0"].any == .int(99)
+        }
+
+        assertQuery("(anyCol[%@][%@][%@] == %@)", values: ["key0", "key2", "key5", AnyRealmValue.double(76.54)], count: 1) {
+            $0.anyCol["key0"]["key2"]["key5"] == .double(76.54)
+        }
+
+        assertQuery("(anyCol[%@][%@][%K] == %@)", values: ["key0", "key2", "#any", AnyRealmValue.double(76.54)], count: 1) {
+            $0.anyCol["key0"]["key2"].any == .double(76.54)
+        }
+
+        assertQuery("(anyCol[%@][%@][%@][%@] == %@)", values: ["key0", "key2", "key4", "key6", AnyRealmValue.string("john")], count: 1) {
+            $0.anyCol["key0"]["key2"]["key4"]["key6"] == .string("john")
+        }
+
+        assertQuery("(anyCol[%@][%@][%@][%@] == %@)", values: ["key0", "key2", "key4", "key7", AnyRealmValue.bool(false)], count: 1) {
+            $0.anyCol["key0"]["key2"]["key4"]["key7"] == .bool(false)
+        }
+
+        assertQuery("(anyCol[%@][%K] >= %@)", values: ["key0", "#any", AnyRealmValue.int(99)], count: 1) {
+            $0.anyCol["key0"].any >= .int(99)
+        }
+
+        assertQuery("(anyCol[%@][%K] <= %@)", values: ["key0", "#any", AnyRealmValue.int(99)], count: 1) {
+            $0.anyCol["key0"].any <= .int(99)
+        }
+
+        assertQuery("(anyCol[%@][%@] != %@)", values: ["key0", "key3", AnyRealmValue.int(99)], count: 0) {
+            $0.anyCol["key0"]["key3"] != .int(99)
+        }
+
+        assertQuery("(anyCol[%@][%@] == %@)", values: ["key0", "#any", AnyRealmValue.int(99)], count: 0) {
+            $0.anyCol["key0"]["#any"] == .int(99)
         }
     }
 
@@ -1412,7 +1740,37 @@ class QueryTests: TestCase {
         validateNumericComparisons("optDecimal", \Query<AllCustomPersistableTypes>.optDecimal, nil, count: 0)
     }
 
-    func testGreaterThanAnyRealmValue() {
+    func validateStringComparisons<Root: Object, T: _Persistable>(
+            _ name: String, _ lhs: (Query<Root>) -> Query<T>,
+            _ value: T, letCount: Int = 1, getCount: Int = 1, ltCount: Int = 0, gtCount: Int = 0) where T.PersistedType: _QueryString {
+        assertQuery(Root.self, "(\(name) > %@)", value, count: gtCount) {
+            lhs($0) > value
+        }
+        assertQuery(Root.self, "(\(name) >= %@)", value, count: getCount) {
+            lhs($0) >= value
+        }
+        assertQuery(Root.self, "(\(name) < %@)", value, count: ltCount) {
+            lhs($0) < value
+        }
+        assertQuery(Root.self, "(\(name) <= %@)", value, count: letCount) {
+            lhs($0) <= value
+        }
+    }
+
+    func testStringComparisons() {
+        validateStringComparisons("stringCol", \Query<ModernAllTypesObject>.stringCol, "Foó")
+        validateStringComparisons("stringEnumCol", \Query<ModernAllTypesObject>.stringEnumCol, .value2)
+        validateStringComparisons("string", \Query<AllCustomPersistableTypes>.string, StringWrapper(persistedValue: "Foó"))
+        validateStringComparisons("optStringCol", \Query<ModernAllTypesObject>.optStringCol, "Foó")
+        validateStringComparisons("optStringEnumCol", \Query<ModernAllTypesObject>.optStringEnumCol, .value2)
+        validateStringComparisons("optString", \Query<AllCustomPersistableTypes>.optString, StringWrapper(persistedValue: "Foó"))
+
+        validateStringComparisons("optStringCol", \Query<ModernAllTypesObject>.optStringCol, nil, letCount: 0, gtCount: 1)
+        validateStringComparisons("optStringEnumCol", \Query<ModernAllTypesObject>.optStringEnumCol, nil, letCount: 0, gtCount: 1)
+        validateStringComparisons("optString", \Query<AllCustomPersistableTypes>.optString, nil, letCount: 0, gtCount: 1)
+    }
+
+    func testGreaterThanNumericAnyRealmValue() {
         let object = objects()[0]
         setAnyRealmValueCol(with: .int(123), object: object)
         assertQuery("(anyCol > %@)", AnyRealmValue.int(123), count: 0) {
@@ -1451,7 +1809,18 @@ class QueryTests: TestCase {
         }
     }
 
-    func testLessThanAnyRealmValue() {
+    func testGreaterThanStringAnyRealmValue() {
+        let object = objects()[0]
+        setAnyRealmValueCol(with: .string("FooBar"), object: object)
+        assertQuery("(anyCol > %@)", AnyRealmValue.string("FooBar"), count: 0) {
+            $0.anyCol > .string("FooBar")
+        }
+        assertQuery("(anyCol >= %@)", AnyRealmValue.string("FooBar"), count: 1) {
+            $0.anyCol >= .string("FooBar")
+        }
+    }
+
+    func testLessThanNumericAnyRealmValue() {
         let object = objects()[0]
         setAnyRealmValueCol(with: .int(123), object: object)
         assertQuery("(anyCol < %@)", AnyRealmValue.int(123), count: 0) {
@@ -1487,6 +1856,17 @@ class QueryTests: TestCase {
         }
         assertQuery("(anyCol <= %@)", AnyRealmValue.decimal128(123.456), count: 1) {
             $0.anyCol <= .decimal128(123.456)
+        }
+    }
+
+    func testLessThanStringAnyRealmValue() {
+        let object = objects()[0]
+        setAnyRealmValueCol(with: .string("FooBar"), object: object)
+        assertQuery("(anyCol < %@)", AnyRealmValue.string("FooBar"), count: 0) {
+            $0.anyCol < .string("FooBar")
+        }
+        assertQuery("(anyCol <= %@)", AnyRealmValue.string("FooBar"), count: 1) {
+            $0.anyCol <= .string("FooBar")
         }
     }
 
@@ -1675,6 +2055,61 @@ class QueryTests: TestCase {
                            likeStrings.map { (String?.some($0.0), $0.1, $0.2) }, canMatch: false)
         validateStringLike("optString", \Query<AllCustomPersistableTypes>.optString,
                            likeStrings.map { (StringWrapper(persistedValue: $0.0), $0.1, $0.2) }, canMatch: true)
+    }
+
+    private func validateStringLexicographicalComparison<Root: Object, T: _Persistable>(
+            _ name: String, _ lhs: (Query<Root>) -> Query<T>, _ strings: [(T, (Int, Int, Int, Int))]) where T.PersistedType: _QueryString {
+        for (str, (gtCount, getCount, ltCount, letCount)) in strings {
+            assertQuery(Root.self, "(\(name) > %@)", str, count: gtCount) {
+                lhs($0) > str
+            }
+            assertQuery(Root.self, "(\(name) >= %@)", str, count: getCount) {
+                lhs($0) >= str
+            }
+            assertQuery(Root.self, "(\(name) < %@)", str, count: ltCount) {
+                lhs($0) < str
+            }
+            assertQuery(Root.self, "(\(name) <= %@)", str, count: letCount) {
+                lhs($0) <= str
+            }
+        }
+    }
+
+    func testLexicographicalComparison() throws {
+        let obj = objects().first!
+        try realm.write {
+            obj.stringEnumCol = .value4
+            obj.optStringEnumCol = .value4
+        }
+        let likeStrings: [(String, (Int, Int, Int, Int))] = [
+            ("Foó", (0, 1, 0, 1)),
+            ("Foo", (1, 1, 0, 0)),
+            ("f*", (0, 0, 1, 1)),
+            ("*ó", (1, 1, 0, 0)),
+            ("f?ó", (0, 0, 1, 1)),
+            ("f*ó", (0, 0, 1, 1)),
+            ("f??ó", (0, 0, 1, 1)),
+            ("*o*", (1, 1, 0, 0)),
+            ("*O*", (1, 1, 0, 0)),
+            ("?o?", (1, 1, 0, 0)),
+            ("?O?", (1, 1, 0, 0)),
+            ("Foô", (0, 0, 1, 1)),
+            ("Fpó", (0, 0, 1, 1)),
+            ("Goó", (0, 0, 1, 1)),
+            ("Foò", (1, 1, 0, 0)),
+            ("Fnó", (1, 1, 0, 0)),
+             ("Eoó", (1, 1, 0, 0)),
+        ]
+        validateStringLexicographicalComparison("stringCol", \Query<ModernAllTypesObject>.stringCol, likeStrings)
+        validateStringLexicographicalComparison("stringEnumCol", \Query<ModernAllTypesObject>.stringEnumCol.rawValue, likeStrings)
+        validateStringLexicographicalComparison("string", \Query<AllCustomPersistableTypes>.string,
+                           likeStrings.map { (StringWrapper(persistedValue: $0.0), $0.1) })
+        validateStringLexicographicalComparison("optStringCol", \Query<ModernAllTypesObject>.optStringCol,
+                           likeStrings.map { (String?.some($0.0), $0.1) })
+        validateStringLexicographicalComparison("optStringEnumCol", \Query<ModernAllTypesObject>.optStringEnumCol.rawValue,
+                           likeStrings.map { (String?.some($0.0), $0.1) })
+        validateStringLexicographicalComparison("optString", \Query<AllCustomPersistableTypes>.optString,
+                           likeStrings.map { (StringWrapper(persistedValue: $0.0), $0.1) })
     }
 
     // MARK: - Data
@@ -3685,29 +4120,29 @@ class QueryTests: TestCase {
 
     func testCollectionFromProperty() {
         try! realm.write {
-            let objModernCollectionsOfEnums = realm.objects(ModernCollectionsOfEnums.self).first!
-            _ = realm.create(LinkToModernCollectionsOfEnums.self, value: [
-                "list": [objModernCollectionsOfEnums],
-                "set": [objModernCollectionsOfEnums],
-                "map": ["foo": objModernCollectionsOfEnums]
-            ])
             let objCustomPersistableCollections = realm.objects(CustomPersistableCollections.self).first!
             _ = realm.create(LinkToCustomPersistableCollections.self, value: [
                 "list": [objCustomPersistableCollections],
                 "set": [objCustomPersistableCollections],
                 "map": ["foo": objCustomPersistableCollections]
             ])
-            let objModernAllTypesObject = realm.objects(ModernAllTypesObject.self).first!
-            _ = realm.create(LinkToModernAllTypesObject.self, value: [
-                "list": [objModernAllTypesObject],
-                "set": [objModernAllTypesObject],
-                "map": ["foo": objModernAllTypesObject]
+            let objModernCollectionsOfEnums = realm.objects(ModernCollectionsOfEnums.self).first!
+            _ = realm.create(LinkToModernCollectionsOfEnums.self, value: [
+                "list": [objModernCollectionsOfEnums],
+                "set": [objModernCollectionsOfEnums],
+                "map": ["foo": objModernCollectionsOfEnums]
             ])
             let objAllCustomPersistableTypes = realm.objects(AllCustomPersistableTypes.self).first!
             _ = realm.create(LinkToAllCustomPersistableTypes.self, value: [
                 "list": [objAllCustomPersistableTypes],
                 "set": [objAllCustomPersistableTypes],
                 "map": ["foo": objAllCustomPersistableTypes]
+            ])
+            let objModernAllTypesObject = realm.objects(ModernAllTypesObject.self).first!
+            _ = realm.create(LinkToModernAllTypesObject.self, value: [
+                "list": [objModernAllTypesObject],
+                "set": [objModernAllTypesObject],
+                "map": ["foo": objModernAllTypesObject]
             ])
         }
 
@@ -3722,7 +4157,6 @@ class QueryTests: TestCase {
             XCTAssertEqual(obj.map.where(q2).count, 1)
         }
 
-        // swiftlint:disable opening_brace
         test(LinkToModernAllTypesObject.self, "(boolCol == %@)",
              false,
              { $0.boolCol == false },
@@ -3963,7 +4397,6 @@ class QueryTests: TestCase {
              UUIDWrapper(persistedValue: UUID(uuidString: "33041937-05b2-464a-98ad-3910cbe0d09f")!),
              { $0.optUuid == UUIDWrapper(persistedValue: UUID(uuidString: "33041937-05b2-464a-98ad-3910cbe0d09f")!) },
              { $0.optUuid == UUIDWrapper(persistedValue: UUID(uuidString: "33041937-05b2-464a-98ad-3910cbe0d09f")!) })
-        // swiftlint:enable opening_brace
     }
 
     func testSetContainsObject() {
@@ -8708,6 +9141,38 @@ class QueryTests: TestCase {
             $0.stringEnumCol != $0.stringEnumCol
         }
 
+        assertQuery("(stringEnumCol > stringEnumCol)", count: 0) {
+            $0.stringEnumCol > $0.stringEnumCol
+        }
+
+        assertQuery("(stringCol > stringCol)", count: 0) {
+            $0.stringCol > $0.stringCol
+        }
+
+        assertQuery("(stringEnumCol >= stringEnumCol)", count: 1) {
+            $0.stringEnumCol >= $0.stringEnumCol
+        }
+
+        assertQuery("(stringCol >= stringCol)", count: 1) {
+            $0.stringCol >= $0.stringCol
+        }
+
+        assertQuery("(stringEnumCol < stringEnumCol)", count: 0) {
+            $0.stringEnumCol < $0.stringEnumCol
+        }
+
+        assertQuery("(stringCol < stringCol)", count: 0) {
+            $0.stringCol < $0.stringCol
+        }
+
+        assertQuery("(stringEnumCol <= stringEnumCol)", count: 1) {
+            $0.stringEnumCol <= $0.stringEnumCol
+        }
+
+        assertQuery("(stringCol <= stringCol)", count: 1) {
+            $0.stringCol <= $0.stringCol
+        }
+
         assertThrows(assertQuery("", count: 1) {
             $0.arrayCol == $0.arrayCol
         }, reason: "Comparing two collection columns is not permitted.")
@@ -9476,10 +9941,10 @@ private protocol LinkToTestObject: Object {
     var set: MutableSet<Child> { get }
     var map: Map<String, Child?> { get }
 }
-extension LinkToModernCollectionsOfEnums: LinkToTestObject {}
 extension LinkToCustomPersistableCollections: LinkToTestObject {}
-extension LinkToModernAllTypesObject: LinkToTestObject {}
+extension LinkToModernCollectionsOfEnums: LinkToTestObject {}
 extension LinkToAllCustomPersistableTypes: LinkToTestObject {}
+extension LinkToModernAllTypesObject: LinkToTestObject {}
 
 private protocol QueryValue {
     static func queryValues() -> [Self]
